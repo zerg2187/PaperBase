@@ -1,5 +1,7 @@
 # Paperbase
 
+![CI](https://github.com/yourname/paperbase/actions/workflows/ci.yml/badge.svg)
+
 AI論文をセマンティック検索・管理できる Web アプリケーション。
 
 - バックエンド: Go (標準 `net/http` + PostgreSQL)
@@ -84,7 +86,21 @@ npm run dev
 
 `http://localhost:5173` でアプリが開きます。
 
-## ビルド
+### 6. 便利な Make コマンド
+
+```bash
+# バックエンド + フロントエンドを同時起動
+make dev
+
+# テスト実行（Go + フロントエンド）
+make test
+
+# リント実行（Go vet + ESLint）
+make lint
+
+# フロントエンド本番ビルド
+make build
+```
 
 フロントエンドの本番ビルド:
 
@@ -97,24 +113,42 @@ npm run build
 
 ## テスト
 
-バックエンド:
+### クイックスタート
 
 ```bash
+# 全テストを実行
+make test
+
+# 個別に実行する場合
 go test ./...
+cd frontend && npm run test:run
 ```
 
-フロントエンド:
+### テスト戦略
 
-```bash
-cd frontend
-npm test -- --run
-```
+| 層 | 対象 | 実行方法 | 目的 |
+|---|---|---|---|
+| **Unit** | バックエンドハンドラ、ユーティリティ | `go test ./...` | 入力バリデーション、単体ロジック |
+| **Unit** | React コンポーネント、API クライアント | `npm run test:run` | UI イベント、モック API 応答 |
+| **Integration** | フロントエンド ↔ バックエンド API | `npm run test:integration` | 実際のバックエンド・DB との連携 |
+| **E2E** | 実ブラウザ操作 | 未導入 | 必要に応じて Playwright 等を追加 |
+
+### 新機能追加時のテストルール
+
+- バックエンドハンドラを追加したら、最低 1 つバリデーションテストを書く
+- React コンポーネントの新しい UI フロー（モーダル開閉など）は `@testing-library/react` でテストする
+- 外部 API や DB に依存する処理は、Go では `mock_clients.go`、フロントエンドでは MSW を使ってモック化する
+- 統合テストは CI では実行せず、ローカルでバックエンドを起動した状態で手動実行する
 
 ## プロジェクト構成
 
 ```
 .
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # GitHub Actions CI
 ├── main.go                     # エントリポイント
+├── Makefile                    # 開発コマンド
 ├── internal/paperbase/         # バックエンドロジック
 │   ├── handlers.go             # HTTP ハンドラ
 │   ├── database.go             # DB アクセス
@@ -134,6 +168,17 @@ npm test -- --run
 ├── .env.example                # 環境変数サンプル
 └── README.md
 ```
+
+## 開発ワークフロー
+
+機能を継続的に追加する場合の推奨フロー:
+
+1. `git checkout -b feature/xxx` でブランチを切る
+2. 機能実装 + テストを書く
+3. `make lint` と `make test` をローカルで実行
+4. `git push` して Pull Request を作成
+5. GitHub Actions の CI が通ったら `main` にマージ
+6. Render / Vercel などが自動デプロイ（連携後）
 
 ## Supabase でのデータベース構築
 

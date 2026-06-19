@@ -83,12 +83,20 @@ describe('App Component', () => {
     })
   })
 
-  it('should display paper cards with actions', async () => {
-    const { container } = render(<App />)
+  it('should open tag edit modal when clicking edit button in tag management', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    const tagManageButton = await screen.findByText('タグ管理')
+    await user.click(tagManageButton)
+
+    const tagEditButton = await screen.findByTitle('編集')
+    await user.click(tagEditButton)
 
     await waitFor(() => {
-      const bibTeXButtons = container.querySelectorAll('.action-copy')
-      expect(bibTeXButtons.length).toBeGreaterThan(0)
+      expect(screen.getByText('タグ編集')).toBeInTheDocument()
+      expect(screen.getByLabelText('タグ名')).toBeInTheDocument()
+      expect(screen.getByLabelText('色')).toBeInTheDocument()
     })
   })
-})
+
