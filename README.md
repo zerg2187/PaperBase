@@ -34,7 +34,14 @@ cd paperbase
 
 ### 2. 環境変数を設定
 
-リポジトリルートに `.env` を作成します。
+`.env.example` をコピーして `.env` を作成します。
+
+```bash
+cp .env.example .env
+# 各値を自分の環境に合わせて編集
+```
+
+主な環境変数:
 
 ```env
 DATABASE_URL=postgres://user:password@localhost:5432/paperbase?sslmode=disable
@@ -45,9 +52,15 @@ PORT=8080
 
 ### 3. データベースを準備
 
+#### ローカル PostgreSQL の場合
+
 ```bash
-psql $DATABASE_URL -f migrations/add_tags.sql
+psql $DATABASE_URL -f migrations/init.sql
 ```
+
+#### Supabase を使う場合
+
+Supabase プロジェクト作成後、SQL Editor で `migrations/init.sql` の内容を実行するか、[Supabase CLI](#supabase-cli) でマイグレーションを適用してください。
 
 ### 4. バックエンドを起動
 
@@ -109,7 +122,8 @@ npm test -- --run
 │   ├── pipeline.go             # 論文登録パイプライン
 │   └── *_test.go               # テスト
 ├── migrations/
-│   └── add_tags.sql            # DB マイグレーション
+│   ├── init.sql                # 初期スキーマ（papers, tags, paper_tags）
+│   └── add_tags.sql            # タグ機能追加用マイグレーション（既存DB向け）
 ├── frontend/                   # React + Vite フロントエンド
 │   ├── src/
 │   │   ├── App.tsx             # メインアプリ
@@ -117,8 +131,65 @@ npm test -- --run
 │   │   └── types.ts            # 型定義
 │   └── index.html
 ├── .env                        # 環境変数（gitignore）
+├── .env.example                # 環境変数サンプル
 └── README.md
 ```
+
+## Supabase でのデータベース構築
+
+[Supabase](https://supabase.com/) は PostgreSQL + pgvector をホスティングできるサービスで、再現性のある環境を簡単に作れます。
+
+### 方法 1: SQL Editor で実行（最も簡単）
+
+1. Supabase プロジェクトを作成
+2. Dashboard → SQL Editor → `New query`
+3. `migrations/init.sql` の内容を貼り付けて `Run`
+4. Project Settings → Database → Connection string → URI をコピー
+5. `.env` の `DATABASE_URL` に設定
+
+### 方法 2: Supabase CLI を使う
+
+#### 1. CLI のインストール
+
+```bash
+npm install -g supabase
+```
+
+#### 2. プロジェクトの紐付け
+
+```bash
+supabase login
+supabase link --project-ref your-project-ref
+```
+
+`your-project-ref` は Supabase Dashboard の URL（例: `https://xxxxxxxxxxxxxx.supabase.co`）の `xxxxxxxxxxxxxx` 部分です。
+
+#### 3. マイグレーションファイルの配置
+
+```bash
+mkdir -p supabase/migrations
+cp migrations/init.sql supabase/migrations/20240101000000_init.sql
+```
+
+#### 4. リモート DB に適用
+
+```bash
+supabase db push
+```
+
+#### 5. 接続文字列の取得
+
+```bash
+supabase status
+```
+
+または Dashboard → Database → Connection string から `DATABASE_URL` をコピーして `.env` に貼り付けます。
+
+### 注意点
+
+- Supabase では `vector` 拡張（pgvector）がデフォルトで有効です。
+- 接続文字列には `sslmode=require` を含めることを推奨します。
+- Pooler 接続（Transaction pooler）を使う場合、ポート 6543 を指定します。
 
 ## デプロイ
 
@@ -137,14 +208,15 @@ git push -u origin main
 
 ### 方法 A: Render（おすすめ・無料枠あり）
 
-バックエンドとフロントエンドを同じプラットフォームで管理できます。
+バックエンドとフロントエンドを同じプラットフォームで管理できます。PostgreSQL は Render PostgreSQL または [Supabase](#supabase-でのデータベース構築) を利用できます。
 
 1. [Render](https://render.com/) で GitHub リポジトリを連携
-2. **Web Service** を作成（Go）
+2. PostgreSQL を用意（Render PostgreSQL または Supabase）
+3. **Web Service** を作成（Go）
    - Build Command: `go build -o paperbase main.go`
    - Start Command: `./paperbase`
    - 環境変数: `DATABASE_URL`, `GEMINI_API_KEY`, `SEMANTIC_API_KEY`, `PORT=10000`
-3. **Static Site** を作成（React）
+4. **Static Site** を作成（React）
    - Root Directory: `frontend`
    - Build Command: `npm install && npm run build`
    - Publish Directory: `dist`
@@ -174,7 +246,8 @@ mux.Handle("GET /", http.FileServer(http.FS(staticFS)))
 
 - `.env` や API キーは絶対に Git にコミットしないでください（`.gitignore` に含まれています）。
 - 本番環境では CORS の `Access-Control-Allow-Origin: *` をフロントエンドのドメインに絞ってください。
-- PostgreSQL は外部ホスティングサービス（Render PostgreSQL、Supabase、AWS RDS など）を利用してください。
+- PostgreSQL は外部ホスティングサービス（Render PostgreSQL、[Supabase](#supabase-でのデータベース構築)、AWS RDS など）を利用してください。
+- Supabase を使う場合、接続文字列に `sslmode=require` を含め、5432 ポート（Direct connection）または 6543 ポート（Transaction pooler）を使用してください。
 
 ## License
 

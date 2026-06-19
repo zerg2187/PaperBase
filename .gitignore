@@ -32,11 +32,11 @@ frontend/.env.*.local
 frontend/coverage/
 frontend/*.log
 
-# =============================================================================
-# Claude / Development artifacts
-# =============================================================================
-.claude/
 plans.md
+# Supabase CLI
+supabase/.branches/
+supabase/.temp/
+supabase/.env
 
 # =============================================================================
 # Editor / OS
