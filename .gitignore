@@ -14,7 +14,7 @@
 *.dll
 *.so
 *.dylib
-paperbase
+/paperbase
 
 # テストカバレッジ
 coverage.out

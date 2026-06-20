@@ -90,8 +90,8 @@ describe('App Component', () => {
     const tagManageButton = await screen.findByText('タグ管理')
     await user.click(tagManageButton)
 
-    const tagEditButton = await screen.findByTitle('編集')
-    await user.click(tagEditButton)
+    const tagEditButtons = await screen.findAllByTitle('編集')
+    await user.click(tagEditButtons[0])
 
     await waitFor(() => {
       expect(screen.getByText('タグ編集')).toBeInTheDocument()
@@ -100,3 +100,4 @@ describe('App Component', () => {
     })
   })
 
+})

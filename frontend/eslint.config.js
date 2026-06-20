@@ -18,5 +18,9 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // 初期データ取得など、useEffect 内で setState する一般的なパターンを許容
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])
