@@ -106,31 +106,3 @@ func (m *MockGeminiClient) EmbedText(ctx context.Context, text string) ([]float3
 	return vector, nil
 }
 
-// MockDatabaseClient はデータベースクライアントのモック
-type MockDatabaseClient struct {
-	UpsertPaperFunc          func(ctx context.Context, paper *Paper) error
-	SearchPapersFunc         func(ctx context.Context, query string, mode string) ([]Paper, error)
-	SearchPapersSemanticFunc func(ctx context.Context, queryVector []float32, limit int) ([]Paper, error)
-}
-
-func (m *MockDatabaseClient) UpsertPaper(ctx context.Context, paper *Paper) error {
-	if m.UpsertPaperFunc != nil {
-		return m.UpsertPaperFunc(ctx, paper)
-	}
-	return nil
-}
-
-func (m *MockDatabaseClient) SearchPapers(ctx context.Context, query string, mode string) ([]Paper, error) {
-	if m.SearchPapersFunc != nil {
-		return m.SearchPapersFunc(ctx, query, mode)
-	}
-	return []Paper{}, nil
-}
-
-func (m *MockDatabaseClient) SearchPapersSemantic(ctx context.Context, queryVector []float32, limit int) ([]Paper, error) {
-	if m.SearchPapersSemanticFunc != nil {
-		return m.SearchPapersSemanticFunc(ctx, queryVector, limit)
-	}
-	// デフォルトのモックデータ
-	return []Paper{}, nil
-}

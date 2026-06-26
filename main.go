@@ -11,22 +11,42 @@ import (
 )
 
 // corsMiddleware はCORSヘッダーを設定するミドルウェア
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// CORSヘッダーを設定
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Max-Age", "86400")
+func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
 
-		// プリフライトリクエストの場合は200を返す
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+			// 許可されたオリジンを設定
+			if allowedOrigin != "" && allowedOrigin != "*" {
+				// 本番: 指定されたオリジンのみ許可
+				if origin == allowedOrigin {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
+				}
+			} else {
+				// 開発: リクエスト元のオリジンをミラーして許可
+				// FRONTEND_URL が未設定の場合のフォールバック
+				if origin != "" {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
+				} else {
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				}
+			}
 
-		next.ServeHTTP(w, r)
-	})
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE, PATCH")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+
+			// プリフライトリクエストの場合は200を返す
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func main() {
@@ -39,9 +59,19 @@ func main() {
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	s2Key := os.Getenv("SEMANTIC_API_KEY")
 	dbURL := os.Getenv("DATABASE_URL")
+	adminToken := os.Getenv("ADMIN_SECRET_TOKEN")
+	allowedOrigin := os.Getenv("FRONTEND_URL")
 
 	if geminiKey == "" || s2Key == "" {
 		log.Fatal("エラー: 必要なAPIキーが設定されていません (.envを確認してください)")
+	}
+
+	if adminToken == "" {
+		log.Println("警告: ADMIN_SECRET_TOKENが設定されていません。管理者ログインは無効です。")
+	}
+
+	if allowedOrigin == "" {
+		log.Println("警告: FRONTEND_URLが設定されていません。開発モードとしてリクエスト元のオリジンを許可します。本番では必ず FRONTEND_URL を設定してください。")
 	}
 
 	// ハンドラの初期化
@@ -49,10 +79,21 @@ func main() {
 		GeminiAPIKey: geminiKey,
 		S2APIKey:     s2Key,
 		DatabaseURL:  dbURL,
-	})
+	}, adminToken)
+
+	authHandler := paperbase.NewAuthHandler(adminToken)
+	authMiddleware := paperbase.NewAuthMiddleware(adminToken)
 
 	// ルーティング設定
 	mux := http.NewServeMux()
+
+	// 認証エンドポイント
+	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
+	mux.HandleFunc("POST /api/auth/logout", authHandler.Logout)
+	mux.HandleFunc("GET /api/auth/me", authHandler.Me)
+	mux.HandleFunc("GET /api/auth/status", handlers.GetGuestStatus)
+
+	// アプリケーエンドポイント
 	mux.HandleFunc("POST /api/papers", handlers.RegisterPaper)
 	mux.HandleFunc("GET /api/search", handlers.SearchPapers)
 	mux.HandleFunc("GET /api/papers", handlers.GetPapersPaginated)
@@ -70,8 +111,8 @@ func main() {
 		w.Write([]byte(`{"status":"healthy"}`))
 	})
 
-	// CORSミドルウェアを適用
-	handler := corsMiddleware(mux)
+	// 認証ミドルウェア → CORSミドルウェアの順で適用
+	handler := corsMiddleware(allowedOrigin)(authMiddleware(mux))
 
 	// サーバー設定
 	port := os.Getenv("PORT")
@@ -82,6 +123,9 @@ func main() {
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("サーバー起動: http://localhost%s", addr)
 	log.Printf("エンドポイント:")
+	log.Printf("  POST   /api/auth/login       - 管理者ログイン")
+	log.Printf("  POST   /api/auth/logout      - ログアウト")
+	log.Printf("  GET    /api/auth/me          - 認証状態確認")
 	log.Printf("  POST   /api/papers           - 論文登録")
 	log.Printf("  GET    /api/papers           - 論文一覧(ページネーション)")
 	log.Printf("  GET    /api/papers/:id/tags  - 論文タグ取得")

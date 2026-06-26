@@ -6,22 +6,48 @@ import type {
   RegisterPaperResponse,
   SearchResult,
   SearchMode,
-  Tag
+  Tag,
+  AuthState,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
-// =============================================================================
-// 論文登録API
-// =============================================================================
+// Admin トークンはメモリ上に保持（セキュリティのため localStorage には保存しない）
+let adminToken: string | null = null;
 
-export async function registerPaper(arxivId: string): Promise<RegisterPaperResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/papers`, {
-    method: 'POST',
+export function setAdminToken(token: string | null) {
+  adminToken = token;
+}
+
+export function getAdminToken(): string | null {
+  return adminToken;
+}
+
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (adminToken) {
+    headers['Authorization'] = `Bearer ${adminToken}`;
+  }
+  return headers;
+}
+
+function getAuthHeaderOnly(): Record<string, string> {
+  return adminToken ? { Authorization: `Bearer ${adminToken}` } : {};
+}
+
+async function fetchJSON<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: 'include',
+    ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+      ...getAuthHeaders(),
     },
-    body: JSON.stringify({ arxiv_id: arxivId }),
   });
 
   if (!response.ok) {
@@ -30,6 +56,71 @@ export async function registerPaper(arxivId: string): Promise<RegisterPaperRespo
   }
 
   return response.json();
+}
+
+async function fetchJSONWithAdminHeader<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: 'include',
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      ...getAuthHeaderOnly(),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
+  }
+
+  return response.json();
+}
+
+// =============================================================================
+// 認証 API
+// =============================================================================
+
+export async function loginAdmin(token: string): Promise<{ status: string; role: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ token }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`認証エラー: ${response.status} - ${errorText}`);
+  }
+
+  adminToken = token;
+  return response.json();
+}
+
+export async function logoutAdmin(): Promise<{ status: string; message: string }> {
+  return fetchJSON('/api/auth/logout', { method: 'POST' });
+}
+
+export async function getMe(): Promise<AuthState> {
+  return fetchJSONWithAdminHeader('/api/auth/me');
+}
+
+export async function getGuestStatus(): Promise<{ role: string; session_id: string; remaining_paper_count?: number }> {
+  return fetchJSONWithAdminHeader('/api/auth/status');
+}
+
+// =============================================================================
+// 論文登録API
+// =============================================================================
+
+export async function registerPaper(arxivId: string): Promise<RegisterPaperResponse> {
+  return fetchJSON('/api/papers', {
+    method: 'POST',
+    body: JSON.stringify({ arxiv_id: arxivId }),
+  });
 }
 
 // =============================================================================
@@ -40,19 +131,8 @@ export async function searchPapers(
   query: string,
   mode: SearchMode = 'semantic'
 ): Promise<SearchResult[]> {
-  const params = new URLSearchParams({
-    q: query,
-    mode: mode,
-  });
-
-  const response = await fetch(`${API_BASE_URL}/api/search?${params}`);
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
+  const params = new URLSearchParams({ q: query, mode });
+  return fetchJSONWithAdminHeader(`/api/search?${params}`);
 }
 
 // =============================================================================
@@ -60,22 +140,9 @@ export async function searchPapers(
 // =============================================================================
 
 export async function healthCheck(): Promise<{ status: string }> {
-  const response = await fetch(`${API_BASE_URL}/health`);
-  return response.json();
-}
-
-// =============================================================================
-// 全論文取得API（非推奨：getPapersPaginatedを使用してください）
-// =============================================================================
-
-export async function getAllPapers(): Promise<SearchResult[]> {
-  const response = await fetch(`${API_BASE_URL}/api/papers`);
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
+  const response = await fetch(`${API_BASE_URL}/health`, {
+    credentials: 'include',
+  });
   return response.json();
 }
 
@@ -97,14 +164,7 @@ export async function getPapersPaginated(
     params.set('tag_id', tagId.toString());
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/papers?${params}`);
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
+  return fetchJSONWithAdminHeader(`/api/papers?${params}`);
 }
 
 // =============================================================================
@@ -112,16 +172,7 @@ export async function getPapersPaginated(
 // =============================================================================
 
 export async function deletePaper(id: string): Promise<{ status: string; message: string; id: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/papers/${id}`, {
-    method: 'DELETE',
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
+  return fetchJSONWithAdminHeader(`/api/papers/${id}`, { method: 'DELETE' });
 }
 
 // =============================================================================
@@ -129,20 +180,10 @@ export async function deletePaper(id: string): Promise<{ status: string; message
 // =============================================================================
 
 export async function deletePapers(ids: string[]): Promise<{ status: string; message: string; count: number }> {
-  const response = await fetch(`${API_BASE_URL}/api/papers/batch-delete`, {
+  return fetchJSON('/api/papers/batch-delete', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ ids }),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
 }
 
 // =============================================================================
@@ -150,87 +191,34 @@ export async function deletePapers(ids: string[]): Promise<{ status: string; mes
 // =============================================================================
 
 export async function getAllTags(): Promise<Tag[]> {
-  const response = await fetch(`${API_BASE_URL}/api/tags`);
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
+  return fetchJSON('/api/tags');
 }
 
 export async function createTag(name: string, color: string): Promise<Tag> {
-  const response = await fetch(`${API_BASE_URL}/api/tags`, {
+  return fetchJSON('/api/tags', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ name, color }),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
 }
 
 export async function updateTag(id: number, name: string, color: string): Promise<{ status: string; message: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/tags/${id}`, {
+  return fetchJSON(`/api/tags/${id}`, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ name, color }),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
 }
 
 export async function deleteTag(id: number): Promise<{ status: string; message: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/tags/${id}`, {
-    method: 'DELETE',
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
+  return fetchJSON(`/api/tags/${id}`, { method: 'DELETE' });
 }
 
 export async function getPaperTags(paperId: string): Promise<Tag[]> {
-  const response = await fetch(`${API_BASE_URL}/api/papers/${paperId}/tags`);
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
+  return fetchJSON(`/api/papers/${paperId}/tags`);
 }
 
 export async function setPaperTags(paperId: string, tagIds: number[]): Promise<{ status: string; message: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/papers/${paperId}/tags`, {
+  return fetchJSON(`/api/papers/${paperId}/tags`, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({ tag_ids: tagIds }),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`APIエラー: ${response.status} - ${errorText}`);
-  }
-
-  return response.json();
 }

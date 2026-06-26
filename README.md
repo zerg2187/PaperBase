@@ -15,6 +15,9 @@ AI論文をセマンティック検索・管理できる Web アプリケーシ�
 - タグ作成・編集・削除・絞り込み
 - BibTeX コピー / 一括エクスポート
 - 一括削除
+- 管理者 / ゲスト認証
+  - 管理者: 無制限登録・全論文削除
+  - ゲスト: セッション Cookie ベース、登録上限・所有者制限あり
 
 ## 必要なもの
 
@@ -24,6 +27,7 @@ AI論文をセマンティック検索・管理できる Web アプリケーシ�
 - API キー
   - `GEMINI_API_KEY`（Google Gemini API）
   - `SEMANTIC_API_KEY`（Semantic Scholar API）
+  - `ADMIN_SECRET_TOKEN`（管理者ログイン用）
 
 ## ローカル開発
 
@@ -150,19 +154,49 @@ cd frontend && npm run test:run
 ├── main.go                     # エントリポイント
 ├── Makefile                    # 開発コマンド
 ├── internal/paperbase/         # バックエンドロジック
-│   ├── handlers.go             # HTTP ハンドラ
+│   ├── handlers.go             # HTTP ハンドラ共通部（構造体・初期化）
+│   ├── auth_handlers.go        # 認証関連ハンドラ
+│   ├── paper_handlers.go       # 論文登録・削除ハンドラ
+│   ├── search_handlers.go      # 検索ハンドラ
+│   ├── pagination_handlers.go  # ページネーションハンドラ
+│   ├── tag_handlers.go         # タグ CRUD ハンドラ
+│   ├── permissions.go          # ゲスト権限・レート制限ヘルパー
+│   ├── responses.go            # API レスポンス型・変換ヘルパー
 │   ├── database.go             # DB アクセス
+│   ├── interfaces.go           # DI 用インターフェース
 │   ├── clients.go              # 外部 API クライアント
-│   ├── pipeline.go             # 論文登録パイプライン
+│   ├── models.go               # 外部 API レスポンス型
+│   ├── auth.go                 # セッション Cookie・admin 判定
+│   ├── ratelimit.go            # レート制限
+│   ├── owners.go               # 論文所有者管理
 │   └── *_test.go               # テスト
 ├── migrations/
-│   ├── init.sql                # 初期スキーマ（papers, tags, paper_tags）
-│   └── add_tags.sql            # タグ機能追加用マイグレーション（既存DB向け）
+│   ├── init.sql                # 初期スキーマ（papers, tags, paper_tags, pgvector）
+│   └── add_auth_and_guest.sql  # ゲスト認証・所有者・レート制限
 ├── frontend/                   # React + Vite フロントエンド
 │   ├── src/
-│   │   ├── App.tsx             # メインアプリ
+│   │   ├── App.tsx             # メインアプリ（状態組み立て）
 │   │   ├── api.ts              # API クライアント
-│   │   └── types.ts            # 型定義
+│   │   ├── types.ts            # 型定義
+│   │   ├── components/         # UI コンポーネント
+│   │   │   ├── Header.tsx
+│   │   │   ├── PaperList.tsx
+│   │   │   ├── PaperCard.tsx
+│   │   │   ├── Pagination.tsx
+│   │   │   ├── FilterBar.tsx
+│   │   │   ├── TagFilter.tsx
+│   │   │   ├── Toast.tsx
+│   │   │   └── modals/         # 各種モーダル
+│   │   ├── hooks/              # カスタムフック
+│   │   │   ├── useAuth.ts
+│   │   │   ├── usePapers.ts
+│   │   │   ├── useTags.ts
+│   │   │   ├── useToast.ts
+│   │   │   ├── useSelection.ts
+│   │   │   └── usePaperRegistration.ts
+│   │   └── test/
+│   │       ├── setup.ts        # テストセットアップ（MSW）
+│   │       └── mocks/handlers.ts # MSW ハンドラー
 │   └── index.html
 ├── .env                        # 環境変数（gitignore）
 ├── .env.example                # 環境変数サンプル

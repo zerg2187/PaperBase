@@ -1,0 +1,238 @@
+package paperbase
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// =============================================================================
+// 認証・セッション管理
+// =============================================================================
+
+const (
+	sessionCookieName = "paperbase_session"
+	sessionCookieMaxAge = 60 * 60 * 24 * 365 // 1年
+)
+
+// AuthInfo はリクエストの認証情報を保持する
+type AuthInfo struct {
+	IsAdmin   bool
+	SessionID string
+}
+
+type authContextKey struct{}
+
+var authKey = authContextKey{}
+
+// generateSessionID は暗号的に安全なセッション ID を生成する
+func generateSessionID() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// isSecureContext はリクエストが HTTPS 経由かどうかを判定する
+func isSecureContext(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+// setSessionCookie はセッション Cookie を設定する
+func setSessionCookie(w http.ResponseWriter, sessionID string, secure bool) {
+	cookie := &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    sessionID,
+		Path:     "/",
+		MaxAge:   sessionCookieMaxAge,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
+}
+
+// getSessionCookie はリクエストからセッション Cookie を取得する
+func getSessionCookie(r *http.Request) (string, error) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return "", err
+	}
+	return cookie.Value, nil
+}
+
+// AuthInfoFromContext はコンテキストから認証情報を取得する
+func AuthInfoFromContext(ctx context.Context) *AuthInfo {
+	if info, ok := ctx.Value(authKey).(*AuthInfo); ok {
+		return info
+	}
+	return &AuthInfo{}
+}
+
+// NewAuthMiddleware は認証ミドルウェアを作成する
+// Admin トークンが Authorization ヘッダーに含まれていれば管理者として扱う
+// そうでなければ session_id Cookie でゲストセッションを識別する
+func NewAuthMiddleware(adminToken string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			info := &AuthInfo{}
+
+			// 1. Admin トークンの確認（Bearer ヘッダー）
+			authHeader := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				token := strings.TrimPrefix(authHeader, "Bearer ")
+				if token != "" && token == adminToken {
+					info.IsAdmin = true
+				}
+			}
+
+			// 2. Session Cookie の確認・発行
+			sessionID, err := getSessionCookie(r)
+			if err != nil || sessionID == "" {
+				sessionID, err = generateSessionID()
+				if err != nil {
+					http.Error(w, "セッション生成エラー", http.StatusInternalServerError)
+					return
+				}
+				setSessionCookie(w, sessionID, isSecureContext(r))
+			}
+			info.SessionID = sessionID
+
+			ctx := context.WithValue(r.Context(), authKey, info)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// RequireSession はセッション ID を持つことを確認するミドルウェア
+func RequireSession(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		info := AuthInfoFromContext(r.Context())
+		if info.SessionID == "" {
+			http.Error(w, "セッションが必要です", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// =============================================================================
+// 認証 API ハンドラ
+// =============================================================================
+
+// AuthHandler は認証関連のハンドラを保持する
+type AuthHandler struct {
+	adminToken string
+}
+
+// NewAuthHandler は新しい AuthHandler を作成する
+func NewAuthHandler(adminToken string) *AuthHandler {
+	return &AuthHandler{adminToken: adminToken}
+}
+
+// LoginRequest はログインリクエスト
+type LoginRequest struct {
+	Token string `json:"token"`
+}
+
+// LoginResponse はログインレスポンス
+type LoginResponse struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	Role    string `json:"role"`
+}
+
+// MeResponse は現在のユーザー情報レスポンス
+type MeResponse struct {
+	Role      string `json:"role"`
+	SessionID string `json:"session_id"`
+}
+
+// Login は Admin トークンを検証するハンドラ
+func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POSTメソッドのみ許可", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "無効なJSON形式", http.StatusBadRequest)
+		return
+	}
+
+	if req.Token != h.adminToken {
+		// わざと曖昧なエラーメッセージ
+		http.Error(w, "認証に失敗しました", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(LoginResponse{
+		Status:  "success",
+		Message: "ログインしました",
+		Role:    "admin",
+	})
+}
+
+// Logout はログアウトハンドラ（フロントエンド側でトークンを破棄するだけだが、API として用意）
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POSTメソッドのみ許可", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "ログアウトしました",
+	})
+}
+
+// Me は現在の認証状態を返すハンドラ
+func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "GETメソッドのみ許可", http.StatusMethodNotAllowed)
+		return
+	}
+
+	info := AuthInfoFromContext(r.Context())
+	role := "guest"
+	if info.IsAdmin {
+		role = "admin"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(MeResponse{
+		Role:      role,
+		SessionID: info.SessionID,
+	})
+}
+
+// SessionIDFromRequest はリクエストからセッション ID を取得する（外部からも使える）
+func SessionIDFromRequest(r *http.Request) string {
+	info := AuthInfoFromContext(r.Context())
+	return info.SessionID
+}
+
+// IsAdminRequest はリクエストが管理者かどうかを判定する（外部からも使える）
+func IsAdminRequest(r *http.Request) bool {
+	info := AuthInfoFromContext(r.Context())
+	return info.IsAdmin
+}
+
+// MockAuthContext はテスト用に認証情報をコンテキストに注入する
+func MockAuthContext(ctx context.Context, isAdmin bool, sessionID string) context.Context {
+	return context.WithValue(ctx, authKey, &AuthInfo{
+		IsAdmin:   isAdmin,
+		SessionID: sessionID,
+	})
+}
+
+// nowFunc はテスト時に差し替え可能な現在時刻取得関数
+var nowFunc = func() time.Time { return time.Now().UTC() }
