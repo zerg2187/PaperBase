@@ -2,18 +2,6 @@
 // 型定義（バックエンドAPIと同期）
 // =============================================================================
 
-export interface Paper {
-  id: string;
-  title: string;
-  authors: string[];
-  venue: string;
-  year: number;
-  abstract: string;
-  bibtex: string;
-  similarity?: number;
-  tags?: Tag[];
-}
-
 export interface Tag {
   id: number;
   name: string;
@@ -43,9 +31,15 @@ export interface SearchResult {
   bibtex: string;
   similarity?: number;
   tags?: Tag[];
+  is_owned_by_me?: boolean;
 }
 
 export type SearchMode = 'semantic' | 'keyword';
+
+export interface AuthState {
+  role: 'admin' | 'guest';
+  session_id: string;
+}
 
 export interface CreateTagRequest {
   name: string;

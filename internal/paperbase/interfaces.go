@@ -2,6 +2,7 @@ package paperbase
 
 import (
 	"context"
+	"io"
 )
 
 // =============================================================================
@@ -22,10 +23,10 @@ type SemanticScholarClient interface {
 // S2SearchResult はS2検索結果の構造体
 type S2SearchResult struct {
 	Data []struct {
-		PaperId     string         `json:"paperId"`
-		Title       string         `json:"title"`
+		PaperId     string        `json:"paperId"`
+		Title       string        `json:"title"`
 		ExternalIds S2ExternalIds `json:"externalIds"`
-		Year        int            `json:"year"`
+		Year        int           `json:"year"`
 		Journal     *S2Journal     `json:"journal"`
 	} `json:"data"`
 }
@@ -39,13 +40,13 @@ type CrossrefClient interface {
 // CrossrefSearchResult はCrossref検索結果の構造体
 type CrossrefSearchResult struct {
 	Items []struct {
-		DOI           string   `json:"DOI"`
-		Title         []string `json:"title"`
-		Type          string   `json:"type"`
+		DOI            string   `json:"DOI"`
+		Title          []string `json:"title"`
+		Type           string   `json:"type"`
 		ContainerTitle []string `json:"container-title"`
-		Volume        string   `json:"volume"`
-		Issue         string   `json:"issue"`
-		Page          string   `json:"page"`
+		Volume         string   `json:"volume"`
+		Issue          string   `json:"issue"`
+		Page           string   `json:"page"`
 	} `json:"items"`
 }
 
@@ -59,24 +60,52 @@ type GeminiClient interface {
 	EmbedText(ctx context.Context, text string) ([]float32, error)
 }
 
-// DatabaseClient はデータベース操作を抽象化する
-type DatabaseClient interface {
+// PaperStore は論文に関するDB操作を抽象化する
+type PaperStore interface {
 	UpsertPaper(ctx context.Context, paper *Paper) error
 	SearchPapers(ctx context.Context, query string, mode string) ([]Paper, error)
 	SearchPapersSemantic(ctx context.Context, queryVector []float32, limit int) ([]Paper, error)
-	GetAllPapers(ctx context.Context) ([]Paper, error)
-	GetPapersPaginated(ctx context.Context, offset int, limit int) ([]Paper, error)
+	SearchPapersSemanticWithSimilarity(ctx context.Context, queryVector []float32, limit int) ([]PaperWithSimilarity, error)
 	DeletePaper(ctx context.Context, id string) error
 	DeletePapers(ctx context.Context, ids []string) error
-	// タグ関連
+	GetPapersPaginated(ctx context.Context, offset int, limit int) ([]Paper, error)
+	GetPapersByTag(ctx context.Context, tagID int, offset int, limit int) ([]Paper, error)
+	GetPapersBySession(ctx context.Context, sessionID string, offset, limit int) ([]Paper, error)
+	GetPapersByTagAndSession(ctx context.Context, tagID int, sessionID string, offset, limit int) ([]Paper, error)
+	SearchPapersBySession(ctx context.Context, query, sessionID string) ([]Paper, error)
+	SearchPapersSemanticBySession(ctx context.Context, queryVector []float32, limit int, sessionID string) ([]PaperWithSimilarity, error)
+}
+
+// TagStore はタグに関するDB操作を抽象化する
+type TagStore interface {
 	GetAllTags(ctx context.Context) ([]Tag, error)
+	GetTagsBySession(ctx context.Context, sessionID string) ([]Tag, error)
 	CreateTag(ctx context.Context, name string, color string) (*Tag, error)
+	CreateTagWithSession(ctx context.Context, name, color, sessionID string) (*Tag, error)
 	UpdateTag(ctx context.Context, id int, name string, color string) error
 	DeleteTag(ctx context.Context, id int) error
 	GetPaperTags(ctx context.Context, paperID string) ([]Tag, error)
+	GetPaperTagsBySession(ctx context.Context, paperID, sessionID string) ([]Tag, error)
 	SetPaperTags(ctx context.Context, paperID string, tagIDs []int) error
-	GetPapersByTag(ctx context.Context, tagID int, offset int, limit int) ([]Paper, error)
-	Close() error
+	IsTagOwner(ctx context.Context, tagID int, sessionID string) (bool, error)
+	AreTagsOwnedBySession(ctx context.Context, tagIDs []int, sessionID string) (bool, error)
+}
+
+// OwnerStore はゲスト所有者に関するDB操作を抽象化する
+type OwnerStore interface {
+	RecordPaperOwner(ctx context.Context, paperID string, sessionID string) error
+	IsPaperOwner(ctx context.Context, paperID string, sessionID string) (bool, error)
+	CountPapersBySession(ctx context.Context, sessionID string) (int, error)
+	GetOwnedPaperIDsBySession(ctx context.Context, sessionID string) (map[string]bool, error)
+	DeletePaperOwner(ctx context.Context, paperID string) error
+}
+
+// DatabaseClient はデータベース操作を抽象化する
+type DatabaseClient interface {
+	PaperStore
+	TagStore
+	OwnerStore
+	io.Closer
 }
 
 // Paper は論文データの構造体
@@ -94,9 +123,10 @@ type Paper struct {
 
 // Tag はタグの構造体
 type Tag struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-	Color string `json:"color"`
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Color     string `json:"color"`
+	SessionID string `json:"-"`
 }
 
 // =============================================================================
@@ -105,12 +135,12 @@ type Tag struct {
 
 // PaperService は論文関連の処理をまとめたサービス
 type PaperService struct {
-	Arxiv            ArxivClient
-	SemanticScholar  SemanticScholarClient
-	Crossref         CrossrefClient
-	DataCite         DataCiteClient
-	Gemini           GeminiClient
-	DB               DatabaseClient
+	Arxiv           ArxivClient
+	SemanticScholar SemanticScholarClient
+	Crossref        CrossrefClient
+	DataCite        DataCiteClient
+	Gemini          GeminiClient
+	DB              DatabaseClient
 }
 
 // NewPaperService は新しいPaperServiceを作成する
@@ -125,9 +155,9 @@ func NewPaperService(
 	return &PaperService{
 		Arxiv:           arxiv,
 		SemanticScholar: s2,
-		Crossref:       crossref,
-		DataCite:       datacite,
-		Gemini:         gemini,
-		DB:             db,
+		Crossref:        crossref,
+		DataCite:        datacite,
+		Gemini:          gemini,
+		DB:              db,
 	}
 }

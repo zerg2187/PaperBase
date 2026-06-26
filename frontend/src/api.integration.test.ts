@@ -14,6 +14,8 @@ import {
   createTag,
   deletePaper,
   deletePapers,
+  loginAdmin,
+  logoutAdmin,
 } from './api'
 
 // グローバルスコープで宣言
@@ -128,6 +130,11 @@ describe('API Integration Tests', () => {
 
     it('should delete multiple papers', async () => {
       if (!backendAvailable) return
+
+      // 一括削除は管理者専用なのでログイン
+      const adminToken = import.meta.env.VITE_ADMIN_SECRET_TOKEN || 'test-token'
+      await loginAdmin(adminToken)
+
       // 既存の論文を再登録（テスト用）
       const paper1 = await registerPaper('1706.03762')  // Attention Is All You Need
       const paper2 = await registerPaper('1810.04805')  // BERT
@@ -136,6 +143,8 @@ describe('API Integration Tests', () => {
       expect(result.status).toBe('success')
       expect(result.count).toBe(2)
       console.log(`✓ Deleted ${result.count} papers in batch`)
+
+      await logoutAdmin()
     }, 60000)
   })
 })

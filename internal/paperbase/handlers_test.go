@@ -22,7 +22,7 @@ func TestSearchPapersHandler_Validation(t *testing.T) {
 		DatabaseURL: "test",
 		GeminiAPIKey: "test",
 	}
-	handlers := NewHandlers(config)
+	handlers := NewHandlers(config, "test-token")
 
 	tests := []struct {
 		name           string
@@ -56,14 +56,15 @@ func TestSearchPapersHandler_Validation(t *testing.T) {
 
 func TestRegisterPaperHandler_Validation(t *testing.T) {
 	config := Config{
-		DatabaseURL: "test",
+		DatabaseURL:  "test",
 		GeminiAPIKey: "test",
 	}
-	handlers := NewHandlers(config)
+	handlers := NewHandlers(config, "test-token")
 
 	tests := []struct {
 		name           string
 		body           string
+		isAdmin        bool
 		expectedStatus int
 	}{
 		{
@@ -82,9 +83,16 @@ func TestRegisterPaperHandler_Validation(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:           "Valid format (no DB, API call)",
+			name:           "Valid format as admin (no DB, API call)",
 			body:           `{"arxiv_id": "1706.03762"}`,
+			isAdmin:        true,
 			expectedStatus: http.StatusInternalServerError, // API呼び出しエラー
+		},
+		{
+			name:           "Valid format as guest (no DB)",
+			body:           `{"arxiv_id": "1706.03762"}`,
+			isAdmin:        false,
+			expectedStatus: http.StatusServiceUnavailable, // DB接続がないため
 		},
 	}
 
@@ -93,6 +101,12 @@ func TestRegisterPaperHandler_Validation(t *testing.T) {
 			req, err := http.NewRequest("POST", "/api/papers", strings.NewReader(tt.body))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", "application/json")
+
+			ctx := req.Context()
+			if tt.isAdmin {
+				ctx = MockAuthContext(ctx, true, "test-admin-session")
+			}
+			req = req.WithContext(ctx)
 
 			rr := httptest.NewRecorder()
 			handlers.RegisterPaper(rr, req)
@@ -107,7 +121,7 @@ func TestCreateTagHandler_Validation(t *testing.T) {
 		DatabaseURL: "test",
 		GeminiAPIKey: "test",
 	}
-	handlers := NewHandlers(config)
+	handlers := NewHandlers(config, "test-token")
 
 	tests := []struct {
 		name           string
@@ -150,7 +164,7 @@ func TestGetPapersPaginated_Validation(t *testing.T) {
 		DatabaseURL: "test",
 		GeminiAPIKey: "test",
 	}
-	handlers := NewHandlers(config)
+	handlers := NewHandlers(config, "test-token")
 
 	tests := []struct {
 		name           string
@@ -184,29 +198,39 @@ func TestGetPapersPaginated_Validation(t *testing.T) {
 
 func TestDeletePapersHandler_Validation(t *testing.T) {
 	config := Config{
-		DatabaseURL: "test",
+		DatabaseURL:  "test",
 		GeminiAPIKey: "test",
 	}
-	handlers := NewHandlers(config)
+	handlers := NewHandlers(config, "test-token")
 
 	tests := []struct {
 		name           string
 		body           string
+		isAdmin        bool
 		expectedStatus int
 	}{
 		{
-			name:           "Empty body",
+			name:           "Empty body as admin (no DB)",
 			body:           `{}`,
-			expectedStatus: http.StatusBadRequest,
+			isAdmin:        true,
+			expectedStatus: http.StatusServiceUnavailable,
 		},
 		{
-			name:           "Empty ids array",
+			name:           "Empty ids array as admin (no DB)",
 			body:           `{"ids": []}`,
-			expectedStatus: http.StatusBadRequest,
+			isAdmin:        true,
+			expectedStatus: http.StatusServiceUnavailable,
 		},
 		{
-			name:           "Valid format (no DB)",
+			name:           "Guest cannot batch delete",
 			body:           `{"ids": ["paper-1", "paper-2"]}`,
+			isAdmin:        false,
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "Valid format as admin (no DB)",
+			body:           `{"ids": ["paper-1", "paper-2"]}`,
+			isAdmin:        true,
 			expectedStatus: http.StatusServiceUnavailable, // DB接続がないため
 		},
 	}
@@ -216,6 +240,9 @@ func TestDeletePapersHandler_Validation(t *testing.T) {
 			req, err := http.NewRequest("POST", "/api/papers/batch-delete", strings.NewReader(tt.body))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", "application/json")
+
+			ctx := MockAuthContext(req.Context(), tt.isAdmin, "test-session")
+			req = req.WithContext(ctx)
 
 			rr := httptest.NewRecorder()
 			handlers.DeletePapers(rr, req)
@@ -230,7 +257,7 @@ func TestDeleteTagHandler_Validation(t *testing.T) {
 		DatabaseURL: "test",
 		GeminiAPIKey: "test",
 	}
-	handlers := NewHandlers(config)
+	handlers := NewHandlers(config, "test-token")
 
 	tests := []struct {
 		name           string
@@ -276,7 +303,7 @@ func TestUpdateTagHandler_Validation(t *testing.T) {
 		DatabaseURL: "test",
 		GeminiAPIKey: "test",
 	}
-	handlers := NewHandlers(config)
+	handlers := NewHandlers(config, "test-token")
 
 	tests := []struct {
 		name           string

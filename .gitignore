@@ -33,10 +33,20 @@ frontend/coverage/
 frontend/*.log
 
 plans.md
+skills-lock.json
+.agents/
+NvimTree_*
 # Supabase CLI
 supabase/.branches/
 supabase/.temp/
 supabase/.env
+
+# =============================================================================
+# Claude / local session artifacts
+# =============================================================================
+.claude/
+CLAUDE.md
+*.log
 
 # =============================================================================
 # Editor / OS
