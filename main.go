@@ -81,16 +81,15 @@ func main() {
 		DatabaseURL:  dbURL,
 	}, adminToken)
 
-	authHandler := paperbase.NewAuthHandler(adminToken)
 	authMiddleware := paperbase.NewAuthMiddleware(adminToken)
 
 	// ルーティング設定
 	mux := http.NewServeMux()
 
 	// 認証エンドポイント
-	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
-	mux.HandleFunc("POST /api/auth/logout", authHandler.Logout)
-	mux.HandleFunc("GET /api/auth/me", authHandler.Me)
+	mux.HandleFunc("POST /api/auth/login", handlers.Login)
+	mux.HandleFunc("POST /api/auth/logout", handlers.Logout)
+	mux.HandleFunc("GET /api/auth/me", handlers.Me)
 	mux.HandleFunc("GET /api/auth/status", handlers.GetGuestStatus)
 
 	// アプリケーエンドポイント

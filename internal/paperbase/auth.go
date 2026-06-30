@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -15,7 +14,7 @@ import (
 // =============================================================================
 
 const (
-	sessionCookieName = "paperbase_session"
+	sessionCookieName   = "paperbase_session"
 	sessionCookieMaxAge = 60 * 60 * 24 * 365 // 1年
 )
 
@@ -122,18 +121,8 @@ func RequireSession(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // =============================================================================
-// 認証 API ハンドラ
+// 認証 API レスポンス型
 // =============================================================================
-
-// AuthHandler は認証関連のハンドラを保持する
-type AuthHandler struct {
-	adminToken string
-}
-
-// NewAuthHandler は新しい AuthHandler を作成する
-func NewAuthHandler(adminToken string) *AuthHandler {
-	return &AuthHandler{adminToken: adminToken}
-}
 
 // LoginRequest はログインリクエスト
 type LoginRequest struct {
@@ -151,67 +140,6 @@ type LoginResponse struct {
 type MeResponse struct {
 	Role      string `json:"role"`
 	SessionID string `json:"session_id"`
-}
-
-// Login は Admin トークンを検証するハンドラ
-func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POSTメソッドのみ許可", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "無効なJSON形式", http.StatusBadRequest)
-		return
-	}
-
-	if req.Token != h.adminToken {
-		// わざと曖昧なエラーメッセージ
-		http.Error(w, "認証に失敗しました", http.StatusUnauthorized)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(LoginResponse{
-		Status:  "success",
-		Message: "ログインしました",
-		Role:    "admin",
-	})
-}
-
-// Logout はログアウトハンドラ（フロントエンド側でトークンを破棄するだけだが、API として用意）
-func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POSTメソッドのみ許可", http.StatusMethodNotAllowed)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "ログアウトしました",
-	})
-}
-
-// Me は現在の認証状態を返すハンドラ
-func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "GETメソッドのみ許可", http.StatusMethodNotAllowed)
-		return
-	}
-
-	info := AuthInfoFromContext(r.Context())
-	role := "guest"
-	if info.IsAdmin {
-		role = "admin"
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(MeResponse{
-		Role:      role,
-		SessionID: info.SessionID,
-	})
 }
 
 // SessionIDFromRequest はリクエストからセッション ID を取得する（外部からも使える）

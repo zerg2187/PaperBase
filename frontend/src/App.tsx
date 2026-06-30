@@ -7,6 +7,9 @@ import { Header } from './components/Header'
 import { FilterBar } from './components/FilterBar'
 import { TagFilter } from './components/TagFilter'
 import { PaperList } from './components/PaperList'
+import { DetailPanel } from './components/DetailPanel'
+import { CartPanel } from './components/CartPanel'
+import { ProgressToast } from './components/ProgressToast'
 import { Toast } from './components/Toast'
 
 import { RegisterModal } from './components/modals/RegisterModal'
@@ -21,8 +24,7 @@ import { useSelection } from './hooks/useSelection'
 import { useTags } from './hooks/useTags'
 import { usePapers } from './hooks/usePapers'
 import { usePaperRegistration } from './hooks/usePaperRegistration'
-
-const ITEMS_PER_PAGE = 10
+import { useCart } from './hooks/useCart'
 
 function App() {
   // Hooks
@@ -30,8 +32,6 @@ function App() {
     papers,
     filteredPapers,
     loading: papersLoading,
-    currentPage,
-    setCurrentPage,
     selectedTagFilter,
     setSelectedTagFilter,
     isFiltered,
@@ -59,31 +59,48 @@ function App() {
   } = useAuth()
 
   const { successMessage, errorMessage, showSuccess, showError, clearSuccess, clearError } = useToast()
-  const { selected: selectedPapers, toggle: toggleSelection, selectAll: selectAllPapers, clear: clearSelection } = useSelection<string>()
+  const { selected: selectedPapers, selectAll: selectAllPapers, clear: clearSelection } = useSelection<string>()
   const { registerLoading, registerProgress, register: registerPapers } = usePaperRegistration()
+  const { cart, addToCart, removeFromCart, clearCart, isInCart } = useCart()
 
   // Modal states
   const [showRegisterModal, setShowRegisterModal] = useState(false)
   const [showSearchModal, setShowSearchModal] = useState(false)
   const [showTagManagerModal, setShowTagManagerModal] = useState(false)
   const [tagSelectPaper, setTagSelectPaper] = useState<SearchResult | null>(null)
+  const [showCartPanel, setShowCartPanel] = useState(false)
+
+  // Detail panel state
+  const [activePaper, setActivePaper] = useState<SearchResult | null>(null)
+
+  // Cart checkbox handler
+  const handleToggleCart = (paperId: string) => {
+    const paper = displayPapers.find(p => p.id === paperId)
+    if (!paper) return
+
+    if (isInCart(paperId)) {
+      removeFromCart(paperId)
+    } else {
+      addToCart(paper)
+    }
+  }
 
   // Initial load
   useEffect(() => {
     loadPapers()
-    loadTags()
-  }, [loadPapers, loadTags])
+    if (authRole === 'admin') {
+      loadTags()
+    }
+  }, [loadPapers, loadTags, authRole])
 
   // Selection state derived from display papers
   const displayCount = displayPapers.length
-  const hasNextPage = papers.length >= ITEMS_PER_PAGE
 
   // Auth handlers
   const handleLogin = async (token: string) => {
     const result = await login(token)
     if (result.success) {
-      setShowLoginModal(false)
-      showSuccess('管理者としてログインしました')
+      window.location.reload()
     }
   }
 
@@ -92,7 +109,7 @@ function App() {
     if (result.success) {
       showSuccess('ログアウトしました')
     } else {
-      showError(result.error)
+      showError(result.error || 'ログアウトに失敗しました')
     }
   }
 
@@ -115,7 +132,9 @@ function App() {
       const results = await search(query, mode)
       clearSelection()
       selectAllPapers(results.map(p => p.id))
-      showSuccess(`${results.length}件の論文が見つかりました`)
+      if (mode === 'keyword') {
+        showSuccess(`${results.length}件の論文が見つかりました`)
+      }
     } catch (err) {
       showError(err instanceof Error ? err.message : '検索に失敗しました')
     }
@@ -128,8 +147,8 @@ function App() {
   }
 
   const handleRegister = async (ids: string[], tagIds: number[]) => {
-    const results = await registerPapers(ids, tagIds)
     setShowRegisterModal(false)
+    const results = await registerPapers(ids, tagIds)
 
     if (results.success > 0) {
       showSuccess(`${results.success}件の論文を登録しました`)
@@ -146,10 +165,18 @@ function App() {
   }
 
   const toggleSelectAll = () => {
-    if (selectedPapers.size === displayCount) {
-      clearSelection()
+    // Use current cart state directly to avoid stale closure
+    const currentCartIds = new Set(cart.map(c => c.id))
+    const allInCart = displayPapers.length > 0 && displayPapers.every(p => currentCartIds.has(p.id))
+
+    if (allInCart) {
+      clearCart()
     } else {
-      selectAllPapers(displayPapers.map(p => p.id))
+      displayPapers.forEach(p => {
+        if (!currentCartIds.has(p.id)) {
+          addToCart(p)
+        }
+      })
     }
   }
 
@@ -159,14 +186,12 @@ function App() {
   }
 
   const exportBibTeX = () => {
-    const selectedPapersData = displayPapers.filter(p => selectedPapers.has(p.id))
-
-    if (selectedPapersData.length === 0) {
-      showError('論文が選択されていません')
+    if (cart.length === 0) {
+      showError('カートが空です')
       return
     }
 
-    const bibTeXContent = selectedPapersData.map(p => p.bibtex).join('\n\n')
+    const bibTeXContent = cart.map(p => p.bibtex).join('\n\n')
     const blob = new Blob([bibTeXContent], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -177,25 +202,40 @@ function App() {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
 
-    showSuccess(`${selectedPapersData.length}件のBibTeXをエクスポートしました`)
+    showSuccess(`${cart.length}件のBibTeXをエクスポートしました`)
+    setShowCartPanel(false)
   }
 
-  const handleBulkDelete = async () => {
-    const selectedIds = Array.from(selectedPapers).filter(id =>
-      displayPapers.some(p => p.id === id)
-    )
-
-    if (selectedIds.length === 0) {
-      showError('論文が選択されていません')
+  const exportPresentation = () => {
+    if (cart.length === 0) {
+      showError('カートが空です')
       return
     }
 
-    if (!confirm(`${selectedIds.length}件の論文を削除しますか？`)) return
+    const content = cart.map(p => {
+      const authors = p.authors.join(', ')
+      return `${p.title}\n${authors} (${p.year})`
+    }).join('\n\n')
+
+    navigator.clipboard.writeText(content)
+    showSuccess(`${cart.length}件のプレゼンテーション用テキストをコピーしました`)
+    setShowCartPanel(false)
+  }
+
+  const handleBulkDelete = async () => {
+    const cartIds = cart.map(c => c.id)
+
+    if (cartIds.length === 0) {
+      showError('カートが空です')
+      return
+    }
+
+    if (!confirm(`${cartIds.length}件の論文を削除しますか？`)) return
 
     try {
-      await bulkDelete(selectedIds)
-      showSuccess(`${selectedIds.length}件の論文を削除しました`)
-      clearSelection()
+      await bulkDelete(cartIds)
+      showSuccess(`${cartIds.length}件の論文を削除しました`)
+      clearCart()
       await loadPapers()
       await loadAuthStatus()
     } catch (err) {
@@ -261,7 +301,6 @@ function App() {
 
   const handleTagFilterSelect = (tagId: number | null) => {
     setSelectedTagFilter(tagId)
-    setCurrentPage(0)
   }
 
   return (
@@ -271,6 +310,7 @@ function App() {
         selectedCount={selectedPapers.size}
         authRole={authRole}
         guestRemainingCount={guestRemainingCount}
+        registerLoading={registerLoading}
         onLoginClick={() => setShowLoginModal(true)}
         onLogout={handleLogout}
         onSearchClick={() => setShowSearchModal(true)}
@@ -287,6 +327,13 @@ function App() {
         <Toast key={`error-${errorMessage}`} message={errorMessage} type="error" onClose={clearError} />
       )}
 
+      {registerLoading && registerProgress && (
+        <ProgressToast
+          current={registerProgress.current}
+          total={registerProgress.total}
+        />
+      )}
+
       <FilterBar
         isFiltered={isFiltered}
         selectedTagFilter={selectedTagFilter}
@@ -295,34 +342,57 @@ function App() {
         onClear={clearFilter}
       />
 
-      <TagFilter
-        tags={tags}
-        selectedTagFilter={selectedTagFilter}
-        onSelect={handleTagFilterSelect}
-      />
+      {authRole === 'admin' && (
+        <TagFilter
+          tags={tags}
+          selectedTagFilter={selectedTagFilter}
+          onSelect={handleTagFilterSelect}
+        />
+      )}
 
       <main className="main-content">
-        <PaperList
-          papers={displayPapers}
-          selectedPapers={selectedPapers}
-          authRole={authRole}
-          loading={papersLoading || tagsLoading}
-          showPagination={!isFiltered || selectedTagFilter !== null}
-          currentPage={currentPage}
-          hasNext={hasNextPage}
-          onToggle={toggleSelection}
-          onSelectAll={toggleSelectAll}
-          onPrevPage={() => setCurrentPage(Math.max(0, currentPage - 1))}
-          onNextPage={() => setCurrentPage(currentPage + 1)}
-          onTagClick={openTagSelectModal}
-          onDelete={handleDeletePaper}
-          onCopyBibTeX={copyBibTeX}
-          onRegisterClick={() => setShowRegisterModal(true)}
-        />
+        <div className="paper-list-zone">
+          <PaperList
+            papers={displayPapers}
+            selectedPapers={new Set(cart.map(c => c.id))}
+            activePaperId={activePaper?.id ?? null}
+            authRole={authRole}
+            loading={papersLoading || tagsLoading}
+            isInCart={isInCart}
+            onToggle={handleToggleCart}
+            onSelectAll={toggleSelectAll}
+            onItemClick={setActivePaper}
+            onRegisterClick={() => setShowRegisterModal(true)}
+          />
+        </div>
+
+        {activePaper && (
+          <div className="detail-panel-zone">
+            <DetailPanel
+              paper={activePaper}
+              authRole={authRole}
+              onClose={() => setActivePaper(null)}
+              onTagClick={() => openTagSelectModal(activePaper)}
+              onDelete={() => handleDeletePaper(activePaper)}
+              onCopyBibTeX={() => copyBibTeX(activePaper.bibtex, activePaper.title)}
+            />
+          </div>
+        )}
       </main>
+
+      <CartPanel
+        cart={cart}
+        onRemove={removeFromCart}
+        onClear={clearCart}
+        onExport={exportBibTeX}
+        onExportPresentation={exportPresentation}
+        isOpen={showCartPanel}
+        onToggle={() => setShowCartPanel(!showCartPanel)}
+      />
 
       <RegisterModal
         isOpen={showRegisterModal}
+        authRole={authRole}
         tags={tags}
         loading={registerLoading}
         progress={registerProgress}

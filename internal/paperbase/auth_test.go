@@ -80,7 +80,7 @@ func TestNewAuthMiddleware_InvalidAdminToken(t *testing.T) {
 }
 
 func TestAuthHandler_Login(t *testing.T) {
-	handler := NewAuthHandler("admin-token")
+	handler := NewHandlers(Config{}, "admin-token")
 
 	tests := []struct {
 		name           string
@@ -119,7 +119,7 @@ func TestAuthHandler_Login(t *testing.T) {
 }
 
 func TestAuthHandler_Logout(t *testing.T) {
-	handler := NewAuthHandler("admin-token")
+	handler := NewHandlers(Config{}, "admin-token")
 
 	req, err := http.NewRequest("POST", "/api/auth/logout", nil)
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestAuthHandler_Logout(t *testing.T) {
 }
 
 func TestAuthHandler_Me(t *testing.T) {
-	handler := NewAuthHandler("admin-token")
+	handler := NewHandlers(Config{}, "admin-token")
 
 	middleware := NewAuthMiddleware("admin-token")
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

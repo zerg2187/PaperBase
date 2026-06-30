@@ -3,6 +3,7 @@ type HeaderProps = {
   selectedCount: number
   authRole: 'admin' | 'guest' | null
   guestRemainingCount: number | null
+  registerLoading: boolean
   onLoginClick: () => void
   onLogout: () => void
   onSearchClick: () => void
@@ -17,6 +18,7 @@ export function Header({
   selectedCount,
   authRole,
   guestRemainingCount,
+  registerLoading,
   onLoginClick,
   onLogout,
   onSearchClick,
@@ -47,7 +49,7 @@ export function Header({
             </span>
           )}
           {authRole === 'guest' && guestRemainingCount !== null && (
-            <span className="stat-badge" title="ゲストは最大10件まで登録できます">
+            <span className="stat-badge" title="ゲストは最大5件まで登録できます">
               <span className="stat-icon">🎫</span>
               残り{guestRemainingCount}件
             </span>
@@ -73,14 +75,20 @@ export function Header({
           <span className="btn-icon">🔍</span>
           検索
         </button>
-        <button onClick={onRegisterClick} className="nav-btn nav-btn-register">
+        <button
+          onClick={onRegisterClick}
+          disabled={registerLoading}
+          className="nav-btn nav-btn-register"
+        >
           <span className="btn-icon">➕</span>
           登録
         </button>
-        <button onClick={onTagManageClick} className="nav-btn nav-btn-tag">
-          <span className="btn-icon">🏷️</span>
-          タグ管理
-        </button>
+        {authRole === 'admin' && (
+          <button onClick={onTagManageClick} className="nav-btn nav-btn-tag">
+            <span className="btn-icon">🏷️</span>
+            タグ管理
+          </button>
+        )}
         <div className="nav-divider" />
         {selectedCount > 0 && (
           <>

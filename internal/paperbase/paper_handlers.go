@@ -3,11 +3,11 @@ package paperbase
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -25,18 +25,6 @@ type RegisterPaperResponse struct {
 		ID    string `json:"id"`
 		Title string `json:"title"`
 	} `json:"data"`
-}
-
-// arxivIDRegex は arXiv ID の基本フォーマットを検証する
-// 例: 2406.11717, arxiv:1706.03762, 1706.03762v1
-var arxivIDRegex = regexp.MustCompile(`^(?:arxiv:)?\d{4}\.\d{4,5}(?:v\d+)?$`)
-
-// validateArxivID は arXiv ID の形式を検証する
-func validateArxivID(id string) error {
-	if !arxivIDRegex.MatchString(id) {
-		return fmt.Errorf("無効な arXiv ID 形式です: %s", id)
-	}
-	return nil
 }
 
 // RegisterPaper は論文を登録するハンドラ
@@ -67,37 +55,57 @@ func (h *Handlers) RegisterPaper(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	arxivID := normalizeArxivID(req.ArxivID)
 
-	// ゲストの場合は登録上限・レート制限をチェック
-	if !isAdmin(r) {
+	admin := isAdmin(r)
+
+	// 管理者はDB必須、ゲストは体験用ストレージ
+	if admin {
 		if !h.requireDB(w) {
 			return
 		}
-		if !h.checkGuestPaperRegister(ctx, w, r) {
+	} else {
+		if !h.checkGuestPaperRegister(ctx, w, r, arxivID) {
 			return
 		}
 	}
 
 	// パイプライン処理を実行
-	paper, err := h.processPaperPipeline(ctx, req.ArxivID)
+	paper, err := h.processPaperPipeline(ctx, arxivID)
 	if err != nil {
 		log.Printf("論文処理エラー: %v", err)
 		http.Error(w, fmt.Sprintf("論文処理エラー: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// データベースに保存
-	if h.db != nil {
+	if admin {
+		// 管理者はDBに永続化
 		if err := h.db.UpsertPaper(ctx, paper); err != nil {
 			log.Printf("DB保存エラー: %v", err)
+			if errors.Is(err, ErrDuplicatePaper) {
+				http.Error(w, "論文IDが既に存在します", http.StatusConflict)
+				return
+			}
 			http.Error(w, "論文の保存に失敗しました", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// ゲストはインメモリセッションに一時保存
+		if err := h.guestStore.StorePaper(sessionID(r), paper); err != nil {
+			log.Printf("ゲスト論文保存エラー: %v", err)
+			if errors.Is(err, ErrDuplicatePaper) {
+				http.Error(w, "論文IDが既に存在します", http.StatusConflict)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}
 	}
 
-	// ゲストが登録した場合は所有者を記録
-	h.recordPaperOwner(ctx, paper.ID, r)
-	h.incrementRateLimit(ctx, r, "paper_register")
+	h.logOperation(ctx, r, "paper_register", paper.ID, map[string]interface{}{
+		"title": paper.Title,
+		"admin": admin,
+	})
 
 	response := RegisterPaperResponse{
 		Status:  "success",
@@ -231,16 +239,32 @@ func (h *Handlers) DeletePaper(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.db == nil {
-		http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
-		return
+	admin := isAdmin(r)
+
+	if admin {
+		if h.db == nil {
+			http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
+			return
+		}
+		if err := h.db.DeletePaper(ctx, paperID); err != nil {
+			log.Printf("論文削除エラー: %v", err)
+			http.Error(w, "削除エラー", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if !h.checkGuestPaperDelete(ctx, w, r, paperID) {
+			return
+		}
+		if err := h.guestStore.DeletePaper(sessionID(r), paperID); err != nil {
+			log.Printf("論文削除エラー: %v", err)
+			http.Error(w, "削除エラー", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	if err := h.db.DeletePaper(ctx, paperID); err != nil {
-		log.Printf("論文削除エラー: %v", err)
-		http.Error(w, "削除エラー", http.StatusInternalServerError)
-		return
-	}
+	h.logOperation(ctx, r, "paper_delete", paperID, map[string]interface{}{
+		"admin": admin,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -299,6 +323,10 @@ func (h *Handlers) DeletePapers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "削除エラー", http.StatusInternalServerError)
 		return
 	}
+
+	h.logOperation(ctx, r, "paper_batch_delete", strings.Join(req.IDs, ","), map[string]interface{}{
+		"count": len(req.IDs),
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

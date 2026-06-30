@@ -11,11 +11,17 @@ AI論文をセマンティック検索・管理できる Web アプリケーシ�
 ## 機能
 
 - arXiv ID から論文を登録（タグ付き）
-- セマンティック検索 / キーワード検索
-- タグ作成・編集・削除・絞り込み
-- BibTeX コピー / 一括エクスポート
-- 一括削除
-- 管理者 / ゲスト認証
+- **リスト表示** - タイトル＋タグのコンパクトなリスト形式
+- **詳細パネル** - クリックで右側に詳細情報を表示
+- **セマンティック検索 / キーワード検索** - 類似度スコア表示
+- **カート機能** - 複数論文を選択してまとめてエクスポート
+- **エクスポート形式**
+  - BibTeX 形式ダウンロード
+  - プレゼンテーション用（著者・タイトル・年）をクリップボードにコピー
+- **タグ作成・編集・削除・絞り込み**
+- **一括削除**
+- **バックグラウンド登録** - 登録中も他の操作が可能、プログレスバー表示
+- **管理者 / ゲスト認証**
   - 管理者: 無制限登録・全論文削除
   - ゲスト: セッション Cookie ベース、登録上限・所有者制限あり
 
@@ -158,34 +164,37 @@ cd frontend && npm run test:run
 │   ├── auth_handlers.go        # 認証関連ハンドラ
 │   ├── paper_handlers.go       # 論文登録・削除ハンドラ
 │   ├── search_handlers.go      # 検索ハンドラ
-│   ├── pagination_handlers.go  # ページネーションハンドラ
 │   ├── tag_handlers.go         # タグ CRUD ハンドラ
-│   ├── permissions.go          # ゲスト権限・レート制限ヘルパー
+│   ├── permissions.go          # ゲスト権限ヘルパー
 │   ├── responses.go            # API レスポンス型・変換ヘルパー
 │   ├── database.go             # DB アクセス
 │   ├── interfaces.go           # DI 用インターフェース
 │   ├── clients.go              # 外部 API クライアント
 │   ├── models.go               # 外部 API レスポンス型
 │   ├── auth.go                 # セッション Cookie・admin 判定
-│   ├── ratelimit.go            # レート制限
-│   ├── owners.go               # 論文所有者管理
+│   ├── guest_store.go          # ゲスト用インメモリ論文ストア
 │   └── *_test.go               # テスト
 ├── migrations/
 │   ├── init.sql                # 初期スキーマ（papers, tags, paper_tags, pgvector）
-│   └── add_auth_and_guest.sql  # ゲスト認証・所有者・レート制限
+│   ├── add_tags.sql            # タグ機能
+│   ├── add_auth_and_guest.sql  # ゲスト認証・所有者・RLS
+│   ├── remove_guest_persistence.sql  # ゲスト永続化削除
+│   └── add_audit_logs.sql      # 操作ログ
 ├── frontend/                   # React + Vite フロントエンド
 │   ├── src/
 │   │   ├── App.tsx             # メインアプリ（状態組み立て）
 │   │   ├── api.ts              # API クライアント
 │   │   ├── types.ts            # 型定義
 │   │   ├── components/         # UI コンポーネント
-│   │   │   ├── Header.tsx
-│   │   │   ├── PaperList.tsx
-│   │   │   ├── PaperCard.tsx
-│   │   │   ├── Pagination.tsx
-│   │   │   ├── FilterBar.tsx
-│   │   │   ├── TagFilter.tsx
-│   │   │   ├── Toast.tsx
+│   │   │   ├── Header.tsx      # ヘッダー（ナビゲーション）
+│   │   │   ├── PaperList.tsx   # 論文リスト
+│   │   │   ├── PaperListItem.tsx  # コンパクトなリスト行
+│   │   │   ├── DetailPanel.tsx # 右側詳細パネル
+│   │   │   ├── CartPanel.tsx   # カートUI
+│   │   │   ├── ProgressToast.tsx  # 登録プログレス表示
+│   │   │   ├── FilterBar.tsx   # フィルターバー
+│   │   │   ├── TagFilter.tsx   # タグ絞り込み
+│   │   │   ├── Toast.tsx       # トースト通知
 │   │   │   └── modals/         # 各種モーダル
 │   │   ├── hooks/              # カスタムフック
 │   │   │   ├── useAuth.ts
@@ -193,6 +202,7 @@ cd frontend && npm run test:run
 │   │   │   ├── useTags.ts
 │   │   │   ├── useToast.ts
 │   │   │   ├── useSelection.ts
+│   │   │   ├── useCart.ts      # カート状態管理
 │   │   │   └── usePaperRegistration.ts
 │   │   └── test/
 │   │       ├── setup.ts        # テストセットアップ（MSW）

@@ -12,11 +12,19 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
-// Admin トークンはメモリ上に保持（セキュリティのため localStorage には保存しない）
-let adminToken: string | null = null;
+const ADMIN_TOKEN_KEY = 'paperbase_admin_token';
+
+// Admin トークンはセッション中のみ sessionStorage に保持
+// （ログイン→リロード後も復元できるようにするため）
+let adminToken: string | null = sessionStorage.getItem(ADMIN_TOKEN_KEY) || null;
 
 export function setAdminToken(token: string | null) {
   adminToken = token;
+  if (token) {
+    sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+  } else {
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  }
 }
 
 export function getAdminToken(): string | null {
@@ -96,7 +104,7 @@ export async function loginAdmin(token: string): Promise<{ status: string; role:
     throw new Error(`認証エラー: ${response.status} - ${errorText}`);
   }
 
-  adminToken = token;
+  setAdminToken(token);
   return response.json();
 }
 

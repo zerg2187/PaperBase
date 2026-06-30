@@ -35,29 +35,33 @@ export function PaperCard({
           onClick={(e) => e.stopPropagation()}
           className="card-checkbox"
         />
-        <div className="card-tags">
-          {extraTags.map(tag => (
-            <span
-              key={tag.id}
-              className="card-tag"
-              style={{ backgroundColor: `${tag.color}20`, color: tag.color }}
+        {authRole === 'admin' && (
+          <>
+            <div className="card-tags">
+              {extraTags.map(tag => (
+                <span
+                  key={tag.id}
+                  className="card-tag"
+                  style={{ backgroundColor: `${tag.color}20`, color: tag.color }}
+                >
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); onTagClick() }}
+              className="card-main-tag"
+              title={mainTag ? `タグ: ${mainTag.name}` : 'タグ設定'}
+              style={mainTag ? {
+                backgroundColor: `${mainTag.color}20`,
+                color: mainTag.color,
+                borderColor: mainTag.color
+              } : undefined}
             >
-              {tag.name}
-            </span>
-          ))}
-        </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); onTagClick() }}
-          className="card-main-tag"
-          title={mainTag ? `タグ: ${mainTag.name}` : 'タグ設定'}
-          style={mainTag ? {
-            backgroundColor: `${mainTag.color}20`,
-            color: mainTag.color,
-            borderColor: mainTag.color
-          } : undefined}
-        >
-          {mainTag ? mainTag.name : 'タグなし'}
-        </button>
+              {mainTag ? mainTag.name : 'タグなし'}
+            </button>
+          </>
+        )}
       </div>
 
       <h3 className="card-title">{paper.title}</h3>

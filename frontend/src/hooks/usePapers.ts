@@ -2,14 +2,13 @@ import { useState, useCallback } from 'react'
 import { getPapersPaginated, searchPapers, deletePaper, deletePapers } from '../api'
 import type { SearchResult, SearchMode } from '../types'
 
-const ITEMS_PER_PAGE = 10
 const SIMILARITY_THRESHOLD = 0.30
+const FETCH_ALL_LIMIT = 10000
 
 export function usePapers() {
   const [papers, setPapers] = useState<SearchResult[]>([])
   const [filteredPapers, setFilteredPapers] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
-  const [currentPage, setCurrentPage] = useState(0)
   const [selectedTagFilter, setSelectedTagFilter] = useState<number | null>(null)
   const [isFiltered, setIsFiltered] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -18,13 +17,12 @@ export function usePapers() {
   const loadPapers = useCallback(async () => {
     setLoading(true)
     try {
-      const offset = currentPage * ITEMS_PER_PAGE
-      const data = await getPapersPaginated(offset, ITEMS_PER_PAGE, selectedTagFilter)
+      const data = await getPapersPaginated(0, FETCH_ALL_LIMIT, selectedTagFilter)
       setPapers(data)
     } finally {
       setLoading(false)
     }
-  }, [currentPage, selectedTagFilter])
+  }, [selectedTagFilter])
 
   const search = useCallback(async (query: string, mode: SearchMode) => {
     setLoading(true)
@@ -57,7 +55,6 @@ export function usePapers() {
 
   const clearTagFilter = useCallback(() => {
     setSelectedTagFilter(null)
-    setCurrentPage(0)
     setIsFiltered(false)
   }, [])
 
@@ -69,15 +66,9 @@ export function usePapers() {
 
   const handleBulkDelete = useCallback(async (ids: string[]) => {
     await deletePapers(ids)
-    setPapers(prev => {
-      const remaining = prev.filter(p => !ids.includes(p.id))
-      if (remaining.length === 0 && currentPage > 0) {
-        setCurrentPage(p => p - 1)
-      }
-      return remaining
-    })
+    setPapers(prev => prev.filter(p => !ids.includes(p.id)))
     setFilteredPapers(prev => prev.filter(p => !ids.includes(p.id)))
-  }, [currentPage])
+  }, [])
 
   const displayPapers = (isFiltered && selectedTagFilter === null) ? filteredPapers : papers
 
@@ -85,8 +76,6 @@ export function usePapers() {
     papers,
     filteredPapers,
     loading,
-    currentPage,
-    setCurrentPage,
     selectedTagFilter,
     setSelectedTagFilter,
     isFiltered,

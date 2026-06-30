@@ -3,7 +3,9 @@ package paperbase
 import (
 	"encoding/json"
 	"log"
+	"math"
 	"net/http"
+	"sort"
 )
 
 // SearchPapers は論文を検索するハンドラ
@@ -21,12 +23,46 @@ func (h *Handlers) SearchPapers(w http.ResponseWriter, r *http.Request) {
 		mode = "semantic"
 	}
 
-	// キーワード検索モード
-	if mode == "keyword" {
-		if h.db == nil {
-			http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
+	// ゲストはセッション内のインメモリ論文だけを検索対象にする
+	if !isAdmin(r) {
+		if mode == "keyword" {
+			papers := h.guestStore.SearchPapers(sessionID(r), query)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(toSearchResults(papers))
 			return
 		}
+
+		papers := h.guestStore.GetPapers(sessionID(r), 0, guestPaperRegisterLimit)
+		if len(papers) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]SearchResult{})
+			return
+		}
+
+		vector, err := h.paperService.Gemini.EmbedText(ctx, query)
+		if err != nil {
+			log.Printf("ゲスト検索クエリベクトル化エラー: %v", err)
+			http.Error(w, "検索エラー", http.StatusInternalServerError)
+			return
+		}
+
+		results := searchGuestPapersSemantic(papers, vector, 10)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(toSearchResultsWithSimilarity(results))
+		return
+	}
+
+	// 管理者はDB検索
+	if h.db == nil {
+		http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
+		return
+	}
+
+	// キーワード検索モード
+	if mode == "keyword" {
 		papers, err := h.db.SearchPapers(ctx, query, mode)
 		if err != nil {
 			log.Printf("キーワード検索エラー: %v", err)
@@ -41,11 +77,6 @@ func (h *Handlers) SearchPapers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// セマンティック検索モード
-	if h.db == nil {
-		http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
-		return
-	}
-
 	// クエリをベクトル化
 	vector, err := h.paperService.Gemini.EmbedText(ctx, query)
 	if err != nil {
@@ -65,4 +96,55 @@ func (h *Handlers) SearchPapers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(toSearchResultsWithSimilarity(papersWithSim))
+}
+
+func searchGuestPapersSemantic(papers []Paper, queryVector []float32, limit int) []PaperWithSimilarity {
+	results := make([]PaperWithSimilarity, 0, len(papers))
+	for _, paper := range papers {
+		similarity, ok := cosineSimilarity(queryVector, paper.Embedding)
+		if !ok {
+			continue
+		}
+		results = append(results, PaperWithSimilarity{
+			ID:          paper.ID,
+			Title:       paper.Title,
+			Authors:     paper.Authors,
+			Abstract:    paper.Abstract,
+			Venue:       paper.Venue,
+			Year:        paper.Year,
+			BibTeX:      paper.BibTeX,
+			Similarity:  similarity,
+			Tags:        paper.Tags,
+			IsOwnedByMe: paper.IsOwnedByMe,
+		})
+	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Similarity > results[j].Similarity
+	})
+
+	if limit > 0 && len(results) > limit {
+		return results[:limit]
+	}
+	return results
+}
+
+func cosineSimilarity(a, b []float32) (float64, bool) {
+	if len(a) == 0 || len(a) != len(b) {
+		return 0, false
+	}
+
+	var dot, normA, normB float64
+	for i := range a {
+		av := float64(a[i])
+		bv := float64(b[i])
+		dot += av * bv
+		normA += av * av
+		normB += bv * bv
+	}
+	if normA == 0 || normB == 0 {
+		return 0, false
+	}
+
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB)), true
 }
