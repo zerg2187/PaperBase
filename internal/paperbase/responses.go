@@ -2,15 +2,16 @@ package paperbase
 
 // SearchResult は検索結果の論文データ
 type SearchResult struct {
-	ID         string        `json:"id"`
-	Title      string        `json:"title"`
-	Authors    []string      `json:"authors"`
-	Venue      string        `json:"venue"`
-	Year       int           `json:"year"`
-	Abstract   string        `json:"abstract"`
-	BibTeX     string        `json:"bibtex"`
-	Similarity float64       `json:"similarity,omitempty"`
-	Tags       []TagResponse `json:"tags,omitempty"`
+	ID          string        `json:"id"`
+	Title       string        `json:"title"`
+	Authors     []string      `json:"authors"`
+	Venue       string        `json:"venue"`
+	Year        int           `json:"year"`
+	Abstract    string        `json:"abstract"`
+	BibTeX      string        `json:"bibtex"`
+	Similarity  float64       `json:"similarity,omitempty"`
+	Tags        []TagResponse `json:"tags,omitempty"`
+	IsOwnedByMe bool          `json:"is_owned_by_me,omitempty"`
 }
 
 // TagResponse はタグレスポンス
@@ -36,14 +37,15 @@ func toTagResponses(tags []Tag) []TagResponse {
 // toSearchResult は Paper を SearchResult に変換する
 func toSearchResult(p Paper) SearchResult {
 	return SearchResult{
-		ID:       p.ID,
-		Title:    p.Title,
-		Authors:  p.Authors,
-		Venue:    p.Venue,
-		Year:     p.Year,
-		Abstract: p.Abstract,
-		BibTeX:   p.BibTeX,
-		Tags:     toTagResponses(p.Tags),
+		ID:          p.ID,
+		Title:       p.Title,
+		Authors:     p.Authors,
+		Venue:       p.Venue,
+		Year:        p.Year,
+		Abstract:    p.Abstract,
+		BibTeX:      p.BibTeX,
+		Tags:        toTagResponses(p.Tags),
+		IsOwnedByMe: p.IsOwnedByMe,
 	}
 }
 
@@ -59,15 +61,16 @@ func toSearchResults(papers []Paper) []SearchResult {
 // toSearchResultWithSimilarity は PaperWithSimilarity を SearchResult に変換する
 func toSearchResultWithSimilarity(p PaperWithSimilarity) SearchResult {
 	return SearchResult{
-		ID:         p.ID,
-		Title:      p.Title,
-		Authors:    p.Authors,
-		Venue:      p.Venue,
-		Year:       p.Year,
-		Abstract:   p.Abstract,
-		BibTeX:     p.BibTeX,
-		Similarity: p.Similarity,
-		Tags:       toTagResponses(p.Tags),
+		ID:          p.ID,
+		Title:       p.Title,
+		Authors:     p.Authors,
+		Venue:       p.Venue,
+		Year:        p.Year,
+		Abstract:    p.Abstract,
+		BibTeX:      p.BibTeX,
+		Similarity:  p.Similarity,
+		Tags:        toTagResponses(p.Tags),
+		IsOwnedByMe: p.IsOwnedByMe,
 	}
 }
 

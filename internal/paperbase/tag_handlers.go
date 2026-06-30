@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,8 +28,25 @@ type SetPaperTagsRequest struct {
 	TagIDs []int `json:"tag_ids"`
 }
 
+// tagColors はランダムタグ色の候補パレット
+var tagColors = []string{
+	"#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e",
+	"#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6",
+	"#a855f7", "#d946ef", "#ec4899", "#f43f5e",
+}
+
+// randomTagColor はパレットからランダムに色を選ぶ
+func randomTagColor() string {
+	return tagColors[rand.Intn(len(tagColors))]
+}
+
 // GetAllTags は全タグを取得する
 func (h *Handlers) GetAllTags(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.Error(w, "タグの閲覧は管理者専用です", http.StatusForbidden)
+		return
+	}
+
 	ctx := r.Context()
 
 	if h.db == nil {
@@ -50,6 +68,11 @@ func (h *Handlers) GetAllTags(w http.ResponseWriter, r *http.Request) {
 
 // CreateTag は新しいタグを作成する
 func (h *Handlers) CreateTag(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.Error(w, "タグの作成は管理者専用です", http.StatusForbidden)
+		return
+	}
+
 	ctx := r.Context()
 
 	if r.Method != "POST" {
@@ -76,9 +99,9 @@ func (h *Handlers) CreateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// デフォルト色
+	// デフォルト色はランダム
 	if req.Color == "" {
-		req.Color = "#6366f1"
+		req.Color = randomTagColor()
 	}
 
 	if h.db == nil {
@@ -97,6 +120,10 @@ func (h *Handlers) CreateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logOperation(ctx, r, "tag_create", strconv.Itoa(tag.ID), map[string]interface{}{
+		"name": tag.Name,
+	})
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(TagResponse{
@@ -108,6 +135,11 @@ func (h *Handlers) CreateTag(w http.ResponseWriter, r *http.Request) {
 
 // UpdateTag はタグを更新する
 func (h *Handlers) UpdateTag(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.Error(w, "タグの更新は管理者専用です", http.StatusForbidden)
+		return
+	}
+
 	ctx := r.Context()
 
 	if r.Method != "PUT" && r.Method != "PATCH" {
@@ -149,9 +181,17 @@ func (h *Handlers) UpdateTag(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.db.UpdateTag(ctx, tagID, req.Name, req.Color); err != nil {
 		log.Printf("タグ更新エラー: %v", err)
+		if errors.Is(err, ErrDuplicateTag) {
+			http.Error(w, "タグ名が既に存在します", http.StatusConflict)
+			return
+		}
 		http.Error(w, "更新エラー", http.StatusInternalServerError)
 		return
 	}
+
+	h.logOperation(ctx, r, "tag_update", strconv.Itoa(tagID), map[string]interface{}{
+		"name": req.Name,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -163,6 +203,11 @@ func (h *Handlers) UpdateTag(w http.ResponseWriter, r *http.Request) {
 
 // DeleteTag はタグを削除する
 func (h *Handlers) DeleteTag(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.Error(w, "タグの削除は管理者専用です", http.StatusForbidden)
+		return
+	}
+
 	ctx := r.Context()
 
 	if r.Method != "DELETE" {
@@ -194,6 +239,8 @@ func (h *Handlers) DeleteTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logOperation(ctx, r, "tag_delete", strconv.Itoa(tagID), nil)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
@@ -204,6 +251,11 @@ func (h *Handlers) DeleteTag(w http.ResponseWriter, r *http.Request) {
 
 // GetPaperTags は論文のタグを取得する
 func (h *Handlers) GetPaperTags(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.Error(w, "タグの閲覧は管理者専用です", http.StatusForbidden)
+		return
+	}
+
 	ctx := r.Context()
 
 	// 論文IDの取得
@@ -234,6 +286,11 @@ func (h *Handlers) GetPaperTags(w http.ResponseWriter, r *http.Request) {
 
 // SetPaperTags は論文のタグを設定する
 func (h *Handlers) SetPaperTags(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.Error(w, "タグの設定は管理者専用です", http.StatusForbidden)
+		return
+	}
+
 	ctx := r.Context()
 
 	if r.Method != "PUT" {
@@ -274,6 +331,10 @@ func (h *Handlers) SetPaperTags(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "設定エラー", http.StatusInternalServerError)
 		return
 	}
+
+	h.logOperation(ctx, r, "paper_tag_set", paperID, map[string]interface{}{
+		"tag_ids": req.TagIDs,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

@@ -43,24 +43,29 @@ func (h *Handlers) GetPapersPaginated(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("GetPapersPaginated: offset=%d, limit=%d, tagID=%s", offset, limit, tagIDStr)
 
-	if h.db == nil {
-		http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
-		return
-	}
-
 	var papers []Paper
 
-	// タグで絞り込み
-	if tagIDStr != "" {
-		papers, err = h.db.GetPapersByTag(ctx, tagID, offset, limit)
-	} else {
-		papers, err = h.db.GetPapersPaginated(ctx, offset, limit)
-	}
+	if isAdmin(r) {
+		if h.db == nil {
+			http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
+			return
+		}
 
-	if err != nil {
-		log.Printf("論文取得エラー: %v", err)
-		http.Error(w, "取得エラー", http.StatusInternalServerError)
-		return
+		// タグで絞り込み
+		if tagIDStr != "" {
+			papers, err = h.db.GetPapersByTag(ctx, tagID, offset, limit)
+		} else {
+			papers, err = h.db.GetPapersPaginated(ctx, offset, limit)
+		}
+
+		if err != nil {
+			log.Printf("論文取得エラー: %v", err)
+			http.Error(w, "取得エラー", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// ゲストは自分のセッション内の論文のみ取得（タグ絞り込みは無視）
+		papers = h.guestStore.GetPapers(sessionID(r), offset, limit)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

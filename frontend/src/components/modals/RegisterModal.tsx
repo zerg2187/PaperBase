@@ -3,6 +3,7 @@ import type { Tag } from '../../types'
 
 type RegisterModalProps = {
   isOpen: boolean
+  authRole: 'admin' | 'guest' | null
   tags: Tag[]
   loading: boolean
   progress: { current: number; total: number } | null
@@ -10,7 +11,7 @@ type RegisterModalProps = {
   onRegister: (ids: string[], tagIds: number[]) => Promise<void>
 }
 
-export function RegisterModal({ isOpen, tags, loading, progress, onClose, onRegister }: RegisterModalProps) {
+export function RegisterModal({ isOpen, authRole, tags, loading, progress, onClose, onRegister }: RegisterModalProps) {
   const [arxivIds, setArxivIds] = useState('')
   const [selectedTags, setSelectedTags] = useState<number[]>([])
 
@@ -57,26 +58,28 @@ export function RegisterModal({ isOpen, tags, loading, progress, onClose, onRegi
             />
           </div>
 
-          <div className="form-group">
-            <label className="form-label">タグ（オプション）</label>
-            <div className="tag-selection-area">
-              {tags.map(tag => (
-                <button
-                  key={tag.id}
-                  type="button"
-                  onClick={() => toggleTag(tag.id)}
-                  disabled={loading}
-                  className={selectedTags.includes(tag.id) ? 'tag-select-btn selected' : 'tag-select-btn'}
-                >
-                  <span className="tag-color-dot" style={{ backgroundColor: tag.color }} />
-                  {tag.name}
-                </button>
-              ))}
-              {tags.length === 0 && (
-                <span className="no-tags-hint">タグがありません。先にタグを作成してください。</span>
-              )}
+          {authRole === 'admin' && (
+            <div className="form-group">
+              <label className="form-label">タグ（オプション）</label>
+              <div className="tag-selection-area">
+                {tags.map(tag => (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    onClick={() => toggleTag(tag.id)}
+                    disabled={loading}
+                    className={selectedTags.includes(tag.id) ? 'tag-select-btn selected' : 'tag-select-btn'}
+                  >
+                    <span className="tag-color-dot" style={{ backgroundColor: tag.color }} />
+                    {tag.name}
+                  </button>
+                ))}
+                {tags.length === 0 && (
+                  <span className="no-tags-hint">タグがありません。先にタグを作成してください。</span>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="modal-footer">
             <button type="button" onClick={onClose} disabled={loading} className="btn-secondary">

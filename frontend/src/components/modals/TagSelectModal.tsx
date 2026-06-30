@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { SearchResult, Tag } from '../../types'
+import { randomColor } from '../../utils/randomColor'
+
 
 type TagSelectModalProps = {
   paper: SearchResult
@@ -12,7 +14,7 @@ type TagSelectModalProps = {
 export function TagSelectModal({ paper, tags, onClose, onSetTags, onCreateTag }: TagSelectModalProps) {
   const [selectedTags, setSelectedTags] = useState<number[]>([])
   const [newTagName, setNewTagName] = useState('')
-  const [newTagColor, setNewTagColor] = useState('#6366f1')
+  const [newTagColor, setNewTagColor] = useState(randomColor())
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -35,7 +37,7 @@ export function TagSelectModal({ paper, tags, onClose, onSetTags, onCreateTag }:
       const newTag = await onCreateTag(newTagName.trim(), newTagColor)
       setSelectedTags(prev => [...prev, newTag.id])
       setNewTagName('')
-      setNewTagColor('#6366f1')
+      setNewTagColor(randomColor())
     } catch (err) {
       console.error('タグ作成エラー:', err)
     } finally {

@@ -14,11 +14,11 @@ type Config struct {
 
 // Handlers はHTTPハンドラを保持する
 type Handlers struct {
-	config       Config
+	config      Config
 	paperService *PaperService
-	db           DatabaseClient
-	adminToken   string
-	rateLimiter  RateLimiter
+	db          DatabaseClient
+	adminToken  string
+	guestStore  GuestStore
 }
 
 // NewHandlers は新しいハンドラを作成する
@@ -26,6 +26,7 @@ func NewHandlers(config Config, adminToken string) *Handlers {
 	h := &Handlers{
 		config:     config,
 		adminToken: adminToken,
+		guestStore: NewGuestStore(),
 	}
 
 	// データベースクライアントの初期化（DATABASE_URLがある場合のみ）
@@ -36,13 +37,6 @@ func NewHandlers(config Config, adminToken string) *Handlers {
 		} else {
 			h.db = db
 		}
-	}
-
-	// レート制限の初期化
-	if dbImpl, ok := h.db.(*dbClientImpl); ok && dbImpl.db != nil {
-		h.rateLimiter = NewDBRateLimiter(dbImpl.db, DefaultRateLimits())
-	} else {
-		h.rateLimiter = &NoOpRateLimiter{}
 	}
 
 	// PaperServiceの初期化

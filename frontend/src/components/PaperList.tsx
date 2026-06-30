@@ -1,40 +1,29 @@
 import type { SearchResult } from '../types'
-import { PaperCard } from './PaperCard'
-import { Pagination } from './Pagination'
+import { PaperListItem } from './PaperListItem'
 
 type PaperListProps = {
   papers: SearchResult[]
   selectedPapers: Set<string>
+  activePaperId: string | null
   authRole: 'admin' | 'guest' | null
   loading: boolean
-  showPagination: boolean
-  currentPage: number
-  hasNext: boolean
+  isInCart: (id: string) => boolean
   onToggle: (id: string) => void
   onSelectAll: () => void
-  onPrevPage: () => void
-  onNextPage: () => void
-  onTagClick: (paper: SearchResult) => void
-  onDelete: (paper: SearchResult) => void
-  onCopyBibTeX: (bibtex: string, title: string) => void
+  onItemClick: (paper: SearchResult) => void
   onRegisterClick: () => void
 }
 
 export function PaperList({
   papers,
   selectedPapers,
+  activePaperId,
   authRole,
   loading,
-  showPagination,
-  currentPage,
-  hasNext,
+  isInCart,
   onToggle,
   onSelectAll,
-  onPrevPage,
-  onNextPage,
-  onTagClick,
-  onDelete,
-  onCopyBibTeX,
+  onItemClick,
   onRegisterClick,
 }: PaperListProps) {
   const isAllSelected = papers.length > 0 && papers.every(p => selectedPapers.has(p.id))
@@ -71,29 +60,19 @@ export function PaperList({
             </label>
           </div>
 
-          <div className="paper-grid">
+          <div className="paper-list">
             {papers.map(paper => (
-              <PaperCard
+              <PaperListItem
                 key={paper.id}
                 paper={paper}
-                selected={selectedPapers.has(paper.id)}
+                active={activePaperId === paper.id}
+                inCart={isInCart(paper.id)}
                 authRole={authRole}
-                onToggle={() => onToggle(paper.id)}
-                onTagClick={() => onTagClick(paper)}
-                onDelete={() => onDelete(paper)}
-                onCopyBibTeX={() => onCopyBibTeX(paper.bibtex, paper.title)}
+                onClick={() => onItemClick(paper)}
+                onToggleCart={() => onToggle(paper.id)}
               />
             ))}
           </div>
-
-          {showPagination && (
-            <Pagination
-              currentPage={currentPage}
-              hasNext={hasNext}
-              onPrev={onPrevPage}
-              onNext={onNextPage}
-            />
-          )}
         </>
       )}
     </>

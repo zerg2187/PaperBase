@@ -30,12 +30,11 @@ export function useAuth() {
     loadAuthStatus()
   }, [loadAuthStatus])
 
-  const login = useCallback(async (token: string): Promise<{ success: true } | { success: false; error: string }> => {
+  const login = useCallback(async (token: string): Promise<{ success: boolean; error?: string }> => {
     setLoginError(null)
     setLoginLoading(true)
     try {
       await loginAdmin(token)
-      await loadAuthStatus()
       return { success: true }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'ログインに失敗しました'
@@ -44,20 +43,19 @@ export function useAuth() {
     } finally {
       setLoginLoading(false)
     }
-  }, [loadAuthStatus])
+  }, [])
 
-  const logout = useCallback(async (): Promise<{ success: true } | { success: false; error: string }> => {
+  const logout = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     try {
       await logoutAdmin()
       setAdminToken(null)
-      setAuthRole('guest')
-      await loadAuthStatus()
+      window.location.reload()
       return { success: true }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'ログアウトに失敗しました'
       return { success: false, error: message }
     }
-  }, [loadAuthStatus])
+  }, [])
 
   return {
     authRole,

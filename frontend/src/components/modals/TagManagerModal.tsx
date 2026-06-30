@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import type { Tag } from '../../types'
 import { TagEditModal } from './TagEditModal'
+import { randomColor } from '../../utils/randomColor'
+
 
 type TagManagerModalProps = {
   isOpen: boolean
@@ -24,7 +26,7 @@ export function TagManagerModal({
   onBulkDeleteTags,
 }: TagManagerModalProps) {
   const [newTagName, setNewTagName] = useState('')
-  const [newTagColor, setNewTagColor] = useState('#6366f1')
+  const [newTagColor, setNewTagColor] = useState(randomColor())
   const [selectedTags, setSelectedTags] = useState<Set<number>>(new Set())
   const [editingTag, setEditingTag] = useState<Tag | null>(null)
 
@@ -51,7 +53,7 @@ export function TagManagerModal({
     if (!newTagName.trim()) return
     await onCreateTag(newTagName.trim(), newTagColor)
     setNewTagName('')
-    setNewTagColor('#6366f1')
+    setNewTagColor(randomColor())
   }
 
   const handleBulkDeleteTags = async () => {

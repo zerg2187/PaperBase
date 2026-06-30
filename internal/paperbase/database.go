@@ -3,7 +3,7 @@ package paperbase
 import (
 	"context"
 	"database/sql"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -18,9 +18,6 @@ import (
 type dbClientImpl struct {
 	db *sql.DB
 }
-
-// ErrDuplicateTag はタグ名が既に存在する場合のエラー
-var ErrDuplicateTag = errors.New("タグ名が既に存在します")
 
 // NewDatabaseClient は新しいデータベースクライアントを作成する
 func NewDatabaseClient(dbURL string) (DatabaseClient, error) {
@@ -91,21 +88,20 @@ func (c *dbClientImpl) UpsertPaper(ctx context.Context, paper *Paper) error {
 
 	query := `
 		INSERT INTO papers (id, title, authors, abstract, venue, year, bibtex, embedding)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (id) DO UPDATE
-		SET title = EXCLUDED.title,
-		    abstract = EXCLUDED.abstract,
-		    venue = EXCLUDED.venue,
-		    year = EXCLUDED.year,
-		    bibtex = EXCLUDED.bibtex,
-		    embedding = EXCLUDED.embedding;
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 	`
 
 	_, err := c.db.ExecContext(ctx, query,
 		paper.ID, paper.Title, pq.Array(paper.Authors),
 		paper.Abstract, paper.Venue, paper.Year, paper.BibTeX, vecStr)
+	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return ErrDuplicatePaper
+		}
+		return err
+	}
 
-	return err
+	return nil
 }
 
 func (c *dbClientImpl) SearchPapers(ctx context.Context, query string, mode string) ([]Paper, error) {
@@ -201,15 +197,16 @@ func (c *dbClientImpl) SearchPapersSemantic(ctx context.Context, queryVector []f
 
 // PaperWithSimilarity は類似度を含む論文データ
 type PaperWithSimilarity struct {
-	ID         string
-	Title      string
-	Authors    []string
-	Abstract   string
-	Venue      string
-	Year       int
-	BibTeX     string
-	Similarity float64
-	Tags       []Tag
+	ID          string
+	Title       string
+	Authors     []string
+	Abstract    string
+	Venue       string
+	Year        int
+	BibTeX      string
+	Similarity  float64
+	Tags        []Tag
+	IsOwnedByMe bool
 }
 
 // SearchPapersSemanticWithSimilarity はセマンティック検索を行い、類似度を含む結果を返す
@@ -296,7 +293,6 @@ func (c *dbClientImpl) SearchPapersSemanticWithSimilarity(ctx context.Context, q
 	return papers, nil
 }
 
-
 // DeletePaper は論文を削除する
 func (c *dbClientImpl) DeletePaper(ctx context.Context, id string) error {
 	query := `DELETE FROM papers WHERE id = $1;`
@@ -320,6 +316,33 @@ func (c *dbClientImpl) Close() error {
 		return c.db.Close()
 	}
 	return nil
+}
+
+// LogOperation はユーザー操作ログを記録する
+func (c *dbClientImpl) LogOperation(ctx context.Context, info *AuthInfo, action, target string, details map[string]interface{}, ip, ua string) error {
+	if c.db == nil {
+		return nil
+	}
+
+	role := "guest"
+	if info.IsAdmin {
+		role = "admin"
+	}
+
+	var detailsJSON []byte
+	if len(details) > 0 {
+		var err error
+		detailsJSON, err = json.Marshal(details)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err := c.db.ExecContext(ctx, `
+		INSERT INTO operation_logs (session_id, role, action, target, details, ip_address, user_agent)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, info.SessionID, role, action, target, detailsJSON, ip, ua)
+	return err
 }
 
 // =============================================================================
@@ -421,7 +444,7 @@ func (c *dbClientImpl) DeletePapers(ctx context.Context, ids []string) error {
 
 // GetAllTags は全タグを取得する
 func (c *dbClientImpl) GetAllTags(ctx context.Context) ([]Tag, error) {
-	query := `SELECT id, name, color, session_id FROM tags ORDER BY name;`
+	query := `SELECT id, name, color FROM tags ORDER BY name;`
 
 	rows, err := c.db.QueryContext(ctx, query)
 	if err != nil {
@@ -432,7 +455,7 @@ func (c *dbClientImpl) GetAllTags(ctx context.Context) ([]Tag, error) {
 	var tags []Tag
 	for rows.Next() {
 		var t Tag
-		err := rows.Scan(&t.ID, &t.Name, &t.Color, &t.SessionID)
+		err := rows.Scan(&t.ID, &t.Name, &t.Color)
 		if err != nil {
 			return nil, err
 		}
@@ -468,6 +491,9 @@ func (c *dbClientImpl) UpdateTag(ctx context.Context, id int, name string, color
 
 	result, err := c.db.ExecContext(ctx, query, name, color, id)
 	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return ErrDuplicateTag
+		}
 		return err
 	}
 
@@ -529,39 +555,6 @@ func (c *dbClientImpl) GetPaperTags(ctx context.Context, paperID string) ([]Tag,
 	return tags, nil
 }
 
-// GetPaperTagsBySession は指定セッションのタグのうち、論文に付けられたものを取得する
-func (c *dbClientImpl) GetPaperTagsBySession(ctx context.Context, paperID, sessionID string) ([]Tag, error) {
-	query := `
-		SELECT t.id, t.name, t.color
-		FROM tags t
-		INNER JOIN paper_tags pt ON t.id = pt.tag_id
-		WHERE pt.paper_id = $1 AND t.session_id = $2
-		ORDER BY t.name;
-	`
-
-	rows, err := c.db.QueryContext(ctx, query, paperID, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tags []Tag
-	for rows.Next() {
-		var t Tag
-		err := rows.Scan(&t.ID, &t.Name, &t.Color)
-		if err != nil {
-			return nil, err
-		}
-		tags = append(tags, t)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return tags, nil
-}
-
 // SetPaperTags は論文のタグを設定する（既存のタグを全て削除してから追加）
 func (c *dbClientImpl) SetPaperTags(ctx context.Context, paperID string, tagIDs []int) error {
 	// まず既存のタグを削除
@@ -572,6 +565,10 @@ func (c *dbClientImpl) SetPaperTags(ctx context.Context, paperID string, tagIDs 
 	}
 
 	// 新しいタグを追加
+	if len(tagIDs) == 0 {
+		return nil
+	}
+	tagIDs = uniquePositiveInts(tagIDs)
 	if len(tagIDs) == 0 {
 		return nil
 	}
@@ -589,6 +586,22 @@ func (c *dbClientImpl) SetPaperTags(ctx context.Context, paperID string, tagIDs 
 	insertQuery += strings.Join(values, ", ") + ";"
 	_, err = c.db.ExecContext(ctx, insertQuery, params...)
 	return err
+}
+
+func uniquePositiveInts(values []int) []int {
+	seen := make(map[int]struct{}, len(values))
+	out := make([]int, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // GetPapersByTag はタグで絞り込んで論文を取得する
@@ -673,432 +686,3 @@ func (c *dbClientImpl) GetPapersByTag(ctx context.Context, tagID int, offset int
 
 	return papers, nil
 }
-
-// =============================================================================
-// ゲストごとのデータ分離用メソッド
-// =============================================================================
-
-// GetTagsBySession は指定セッションが作成したタグを取得する
-func (c *dbClientImpl) GetTagsBySession(ctx context.Context, sessionID string) ([]Tag, error) {
-	query := `SELECT id, name, color, session_id FROM tags WHERE session_id = $1 ORDER BY name;`
-
-	rows, err := c.db.QueryContext(ctx, query, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tags []Tag
-	for rows.Next() {
-		var t Tag
-		if err := rows.Scan(&t.ID, &t.Name, &t.Color, &t.SessionID); err != nil {
-			return nil, err
-		}
-		tags = append(tags, t)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return tags, nil
-}
-
-// CreateTagWithSession はセッション情報を付与してタグを作成する
-func (c *dbClientImpl) CreateTagWithSession(ctx context.Context, name, color, sessionID string) (*Tag, error) {
-	query := `INSERT INTO tags (name, color, session_id) VALUES ($1, $2, $3) RETURNING id, name, color, session_id;`
-
-	var t Tag
-	err := c.db.QueryRowContext(ctx, query, name, color, sessionID).Scan(
-		&t.ID, &t.Name, &t.Color, &t.SessionID)
-	if err != nil {
-		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
-			return nil, ErrDuplicateTag
-		}
-		return nil, err
-	}
-
-	return &t, nil
-}
-
-// IsTagOwner は指定セッションがタグの所有者かどうかを判定する
-func (c *dbClientImpl) IsTagOwner(ctx context.Context, tagID int, sessionID string) (bool, error) {
-	var exists bool
-	err := c.db.QueryRowContext(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM tags
-			WHERE id = $1 AND session_id = $2
-		)
-	`, tagID, sessionID).Scan(&exists)
-	if err != nil {
-		return false, err
-	}
-	return exists, nil
-}
-
-// AreTagsOwnedBySession は指定セッションがすべてのタグの所有者かどうかを判定する
-func (c *dbClientImpl) AreTagsOwnedBySession(ctx context.Context, tagIDs []int, sessionID string) (bool, error) {
-	if len(tagIDs) == 0 {
-		return true, nil
-	}
-
-	query := `
-		SELECT COUNT(*) FROM tags
-		WHERE id = ANY($1) AND session_id = $2
-	`
-	var count int
-	err := c.db.QueryRowContext(ctx, query, pq.Array(tagIDs), sessionID).Scan(&count)
-	if err != nil {
-		return false, err
-	}
-	return count == len(tagIDs), nil
-}
-
-// GetPapersBySession は指定セッションが所有者である論文をページネーションで取得する
-func (c *dbClientImpl) GetPapersBySession(ctx context.Context, sessionID string, offset, limit int) ([]Paper, error) {
-	log.Printf("GetPapersBySession: sessionID=%s, offset=%d, limit=%d", sessionID, offset, limit)
-
-	sqlQuery := `
-		WITH page_papers AS (
-			SELECT p.id
-			FROM papers p
-			INNER JOIN paper_owners po ON p.id = po.paper_id
-			WHERE po.session_id = $1
-			ORDER BY p.id DESC
-			LIMIT $2 OFFSET $3
-		)
-		SELECT p.id, p.title, p.authors, p.abstract, p.venue, p.year, p.bibtex,
-		       t.id as tag_id, t.name as tag_name, t.color as tag_color
-		FROM page_papers pp
-		JOIN papers p ON p.id = pp.id
-		LEFT JOIN paper_tags pt ON p.id = pt.paper_id
-		LEFT JOIN tags t ON pt.tag_id = t.id AND t.session_id = $1
-		ORDER BY p.id DESC;
-	`
-
-	rows, err := c.db.QueryContext(ctx, sqlQuery, sessionID, limit, offset)
-	if err != nil {
-		log.Printf("GetPapersBySession query error: %v", err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	papersMap := make(map[string]*Paper)
-	var orderedIDs []string
-	for rows.Next() {
-		var pID, pTitle, pAbstract, pVenue string
-		var authors []string
-		var year sql.NullInt32
-		var bibtex sql.NullString
-		var tagID sql.NullInt32
-		var tagName, tagColor sql.NullString
-
-		err := rows.Scan(
-			&pID, &pTitle, pq.Array(&authors), &pAbstract, &pVenue, &year, &bibtex,
-			&tagID, &tagName, &tagColor)
-		if err != nil {
-			return nil, err
-		}
-
-		if _, exists := papersMap[pID]; !exists {
-			papersMap[pID] = &Paper{
-				ID:       pID,
-				Title:    pTitle,
-				Authors:  authors,
-				Abstract: pAbstract,
-				Venue:    pVenue,
-				Year:     intYear(year),
-				BibTeX:   bibtex.String,
-				Tags:     []Tag{},
-			}
-			orderedIDs = append(orderedIDs, pID)
-		}
-
-		if tagID.Valid {
-			papersMap[pID].Tags = append(papersMap[pID].Tags, Tag{
-				ID:    int(tagID.Int32),
-				Name:  tagName.String,
-				Color: tagColor.String,
-			})
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	var papers []Paper
-	for _, id := range orderedIDs {
-		papers = append(papers, *papersMap[id])
-	}
-
-	return papers, nil
-}
-
-// GetPapersByTagAndSession は指定セッションの論文のうち、指定タグを持つものを取得する
-func (c *dbClientImpl) GetPapersByTagAndSession(ctx context.Context, tagID int, sessionID string, offset, limit int) ([]Paper, error) {
-	log.Printf("GetPapersByTagAndSession: tagID=%d, sessionID=%s, offset=%d, limit=%d", tagID, sessionID, offset, limit)
-
-	sqlQuery := `
-		WITH page_papers AS (
-			SELECT DISTINCT p.id
-			FROM papers p
-			INNER JOIN paper_owners po ON p.id = po.paper_id
-			INNER JOIN paper_tags pt_filter ON p.id = pt_filter.paper_id AND pt_filter.tag_id = $1
-			WHERE po.session_id = $2
-			ORDER BY p.id DESC
-			LIMIT $3 OFFSET $4
-		)
-		SELECT p.id, p.title, p.authors, p.abstract, p.venue, p.year, p.bibtex,
-		       t.id as tag_id, t.name as tag_name, t.color as tag_color
-		FROM page_papers pp
-		JOIN papers p ON p.id = pp.id
-		LEFT JOIN paper_tags pt ON p.id = pt.paper_id
-		LEFT JOIN tags t ON pt.tag_id = t.id AND t.session_id = $2
-		ORDER BY p.id DESC;
-	`
-
-	rows, err := c.db.QueryContext(ctx, sqlQuery, tagID, sessionID, limit, offset)
-	if err != nil {
-		log.Printf("GetPapersByTagAndSession query error: %v", err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	papersMap := make(map[string]*Paper)
-	var orderedIDs []string
-	for rows.Next() {
-		var pID, pTitle, pAbstract, pVenue string
-		var authors []string
-		var year sql.NullInt32
-		var bibtex sql.NullString
-		var tagID sql.NullInt32
-		var tagName, tagColor sql.NullString
-
-		err := rows.Scan(
-			&pID, &pTitle, pq.Array(&authors), &pAbstract, &pVenue, &year, &bibtex,
-			&tagID, &tagName, &tagColor)
-		if err != nil {
-			return nil, err
-		}
-
-		if _, exists := papersMap[pID]; !exists {
-			papersMap[pID] = &Paper{
-				ID:       pID,
-				Title:    pTitle,
-				Authors:  authors,
-				Abstract: pAbstract,
-				Venue:    pVenue,
-				Year:     intYear(year),
-				BibTeX:   bibtex.String,
-				Tags:     []Tag{},
-			}
-			orderedIDs = append(orderedIDs, pID)
-		}
-
-		if tagID.Valid {
-			papersMap[pID].Tags = appendUniqueTag(papersMap[pID].Tags, Tag{
-				ID:    int(tagID.Int32),
-				Name:  tagName.String,
-				Color: tagColor.String,
-			})
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	var papers []Paper
-	for _, id := range orderedIDs {
-		papers = append(papers, *papersMap[id])
-	}
-
-	return papers, nil
-}
-
-// SearchPapersBySession は指定セッションが所有者である論文の中からキーワード検索する
-func (c *dbClientImpl) SearchPapersBySession(ctx context.Context, query, sessionID string) ([]Paper, error) {
-	searchPattern := "%" + query + "%"
-
-	sqlQuery := `
-		WITH matched_papers AS (
-			SELECT p.id
-			FROM papers p
-			INNER JOIN paper_owners po ON p.id = po.paper_id
-			WHERE po.session_id = $1 AND (p.title ILIKE $2 OR p.abstract ILIKE $2)
-			ORDER BY p.id DESC
-			LIMIT 50
-		)
-		SELECT p.id, p.title, p.authors, p.abstract, p.venue, p.year, p.bibtex,
-		       t.id as tag_id, t.name as tag_name, t.color as tag_color
-		FROM matched_papers mp
-		JOIN papers p ON p.id = mp.id
-		LEFT JOIN paper_tags pt ON p.id = pt.paper_id
-		LEFT JOIN tags t ON pt.tag_id = t.id AND t.session_id = $1
-		ORDER BY p.id DESC;
-	`
-
-	rows, err := c.db.QueryContext(ctx, sqlQuery, sessionID, searchPattern)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	papersMap := make(map[string]*Paper)
-	var orderedIDs []string
-	for rows.Next() {
-		var pID, pTitle, pAbstract, pVenue string
-		var authors []string
-		var year sql.NullInt32
-		var bibtex sql.NullString
-		var tagID sql.NullInt32
-		var tagName, tagColor sql.NullString
-
-		err := rows.Scan(
-			&pID, &pTitle, pq.Array(&authors), &pAbstract, &pVenue, &year, &bibtex,
-			&tagID, &tagName, &tagColor)
-		if err != nil {
-			return nil, err
-		}
-
-		if _, exists := papersMap[pID]; !exists {
-			papersMap[pID] = &Paper{
-				ID:       pID,
-				Title:    pTitle,
-				Authors:  authors,
-				Abstract: pAbstract,
-				Venue:    pVenue,
-				Year:     intYear(year),
-				BibTeX:   bibtex.String,
-				Tags:     []Tag{},
-			}
-			orderedIDs = append(orderedIDs, pID)
-		}
-
-		if tagID.Valid {
-			papersMap[pID].Tags = append(papersMap[pID].Tags, Tag{
-				ID:    int(tagID.Int32),
-				Name:  tagName.String,
-				Color: tagColor.String,
-			})
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	var papers []Paper
-	for _, id := range orderedIDs {
-		papers = append(papers, *papersMap[id])
-	}
-
-	return papers, nil
-}
-
-// SearchPapersSemanticBySession は指定セッションが所有者である論文の中からセマンティック検索する
-func (c *dbClientImpl) SearchPapersSemanticBySession(ctx context.Context, queryVector []float32, limit int, sessionID string) ([]PaperWithSimilarity, error) {
-	var vecStrBuilder strings.Builder
-	vecStrBuilder.WriteString("[")
-	for i, v := range queryVector {
-		vecStrBuilder.WriteString(fmt.Sprintf("%f", v))
-		if i < len(queryVector)-1 {
-			vecStrBuilder.WriteString(",")
-		}
-	}
-	vecStrBuilder.WriteString("]")
-	vecStr := vecStrBuilder.String()
-
-	sqlQuery := `
-		WITH matched_papers AS (
-			SELECT p.id, 1 - (p.embedding <=> $1::vector) as similarity
-			FROM papers p
-			INNER JOIN paper_owners po ON p.id = po.paper_id
-			WHERE po.session_id = $2
-			ORDER BY p.embedding <=> $1::vector
-			LIMIT $3
-		)
-		SELECT p.id, p.title, p.authors, p.abstract, p.venue, p.year, p.bibtex,
-		       mp.similarity,
-		       t.id as tag_id, t.name as tag_name, t.color as tag_color
-		FROM matched_papers mp
-		JOIN papers p ON p.id = mp.id
-		LEFT JOIN paper_tags pt ON p.id = pt.paper_id
-		LEFT JOIN tags t ON pt.tag_id = t.id AND t.session_id = $2
-		ORDER BY mp.similarity DESC;
-	`
-
-	rows, err := c.db.QueryContext(ctx, sqlQuery, vecStr, sessionID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	papersMap := make(map[string]*PaperWithSimilarity)
-	var orderedIDs []string
-	for rows.Next() {
-		var pID, pTitle, pAbstract, pVenue string
-		var authors []string
-		var year sql.NullInt32
-		var bibtex sql.NullString
-		var similarity float64
-		var tagID sql.NullInt32
-		var tagName, tagColor sql.NullString
-
-		err := rows.Scan(
-			&pID, &pTitle, pq.Array(&authors), &pAbstract, &pVenue, &year, &bibtex, &similarity,
-			&tagID, &tagName, &tagColor)
-		if err != nil {
-			return nil, err
-		}
-
-		if _, exists := papersMap[pID]; !exists {
-			papersMap[pID] = &PaperWithSimilarity{
-				ID:         pID,
-				Title:      pTitle,
-				Authors:    authors,
-				Abstract:   pAbstract,
-				Venue:      pVenue,
-				Year:       intYear(year),
-				BibTeX:     bibtex.String,
-				Similarity: similarity,
-				Tags:       []Tag{},
-			}
-			orderedIDs = append(orderedIDs, pID)
-		}
-
-		if tagID.Valid {
-			papersMap[pID].Tags = appendUniqueTag(papersMap[pID].Tags, Tag{
-				ID:    int(tagID.Int32),
-				Name:  tagName.String,
-				Color: tagColor.String,
-			})
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	var papers []PaperWithSimilarity
-	for _, id := range orderedIDs {
-		papers = append(papers, *papersMap[id])
-	}
-
-	return papers, nil
-}
-
-
-// Ensure dbClientImpl satisfies session-scoped methods expected by handlers
-var _ interface {
-	GetTagsBySession(ctx context.Context, sessionID string) ([]Tag, error)
-	CreateTagWithSession(ctx context.Context, name, color, sessionID string) (*Tag, error)
-	IsTagOwner(ctx context.Context, tagID int, sessionID string) (bool, error)
-	AreTagsOwnedBySession(ctx context.Context, tagIDs []int, sessionID string) (bool, error)
-	GetPapersBySession(ctx context.Context, sessionID string, offset, limit int) ([]Paper, error)
-	GetPapersByTagAndSession(ctx context.Context, tagID int, sessionID string, offset, limit int) ([]Paper, error)
-	SearchPapersBySession(ctx context.Context, query, sessionID string) ([]Paper, error)
-	SearchPapersSemanticBySession(ctx context.Context, queryVector []float32, limit int, sessionID string) ([]PaperWithSimilarity, error)
-	GetPaperTagsBySession(ctx context.Context, paperID, sessionID string) ([]Tag, error)
-} = (*dbClientImpl)(nil)

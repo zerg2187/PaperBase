@@ -9,9 +9,8 @@ export const handlers = [
   // Auth status
   http.get('http://localhost:8080/api/auth/status', () => {
     return HttpResponse.json({
-      role: 'guest',
+      role: 'admin',
       session_id: 'test-session-id',
-      remaining_paper_count: 10,
     })
   }),
 
