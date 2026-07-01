@@ -13,6 +13,25 @@ jobs:
 
     env:
       GO111MODULE: on
+      DATABASE_URL: postgres://test:password@localhost:5432/test?sslmode=disable
+      GEMINI_API_KEY: test_key
+      SEMANTIC_API_KEY: test_key
+      ADMIN_SECRET_TOKEN: test_token
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: test
+          POSTGRES_DB: test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
     steps:
       - name: Checkout
@@ -35,6 +54,25 @@ jobs:
 
       - name: Run go vet
         run: go vet ./...
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U test; then
+              echo "PostgreSQL is ready"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 1
+          done
+
+      - name: Run migrations
+        run: |
+          psql $DATABASE_URL -f migrations/init.sql || true
+          psql $DATABASE_URL -f migrations/add_tags.sql || true
+          psql $DATABASE_URL -f migrations/add_auth_and_guest.sql || true
+          psql $DATABASE_URL -f migrations/add_audit_logs.sql || true
+          psql $DATABASE_URL -f migrations/add_guest_papers_table.sql || true
 
       - name: Run Go tests
         run: go test ./...
