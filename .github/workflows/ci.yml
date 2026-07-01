@@ -20,7 +20,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:14
+        image: ankane/pgvector:14
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: test
@@ -66,13 +66,32 @@ jobs:
             sleep 1
           done
 
+      - name: Create roles and extension
+        run: |
+          # Create roles used by RLS policies
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -c "
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+                CREATE ROLE anon;
+              END IF;
+              IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+                CREATE ROLE authenticated;
+              END IF;
+            END
+            \$\$;
+          "
+          # Create pgvector extension
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
       - name: Run migrations
         run: |
-          psql $DATABASE_URL -f migrations/init.sql || true
-          psql $DATABASE_URL -f migrations/add_tags.sql || true
-          psql $DATABASE_URL -f migrations/add_auth_and_guest.sql || true
-          psql $DATABASE_URL -f migrations/add_audit_logs.sql || true
-          psql $DATABASE_URL -f migrations/add_guest_papers_table.sql || true
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/init.sql
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_tags.sql
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_auth_and_guest.sql
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/remove_guest_persistence.sql || true
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_audit_logs.sql
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_guest_papers_table.sql
 
       - name: Run Go tests
         run: go test ./...
