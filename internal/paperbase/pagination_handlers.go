@@ -65,7 +65,11 @@ func (h *Handlers) GetPapersPaginated(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// ゲストは自分のセッション内の論文のみ取得（タグ絞り込みは無視）
-		papers = h.guestStore.GetPapers(sessionID(r), offset, limit)
+		if h.db == nil {
+			papers = []Paper{}
+		} else {
+			papers, err = h.db.GetGuestPapers(ctx, sessionID(r), offset, limit)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

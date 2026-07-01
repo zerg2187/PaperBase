@@ -1,8 +1,10 @@
 package paperbase
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 )
 
 // Config はハンドラの設定を保持する
@@ -18,7 +20,7 @@ type Handlers struct {
 	paperService *PaperService
 	db          DatabaseClient
 	adminToken  string
-	guestStore  GuestStore
+	cleanupStop chan struct{}
 }
 
 // NewHandlers は新しいハンドラを作成する
@@ -26,7 +28,6 @@ func NewHandlers(config Config, adminToken string) *Handlers {
 	h := &Handlers{
 		config:     config,
 		adminToken: adminToken,
-		guestStore: NewGuestStore(),
 	}
 
 	// データベースクライアントの初期化（DATABASE_URLがある場合のみ）
@@ -59,4 +60,31 @@ func (h *Handlers) requireDB(w http.ResponseWriter) bool {
 		return false
 	}
 	return true
+}
+
+// StartGuestCleanup は古いゲスト論文の定期削除を開始する
+func (h *Handlers) StartGuestCleanup() {
+	if h.db == nil {
+		return
+	}
+	ticker := time.NewTicker(1 * time.Hour)
+	h.cleanupStop = make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				ctx := context.Background()
+				deleted, err := h.db.CleanupOldGuestPapers(ctx, 24*time.Hour)
+				if err != nil {
+					log.Printf("Guest cleanup error: %v", err)
+				} else if deleted > 0 {
+					log.Printf("Cleaned up %d old guest papers", deleted)
+				}
+			case <-h.cleanupStop:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
 }

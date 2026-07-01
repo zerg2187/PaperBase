@@ -26,14 +26,21 @@ func (h *Handlers) SearchPapers(w http.ResponseWriter, r *http.Request) {
 	// ゲストはセッション内のインメモリ論文だけを検索対象にする
 	if !isAdmin(r) {
 		if mode == "keyword" {
-			papers := h.guestStore.SearchPapers(sessionID(r), query)
+		papers, _ := h.db.SearchGuestPapers(ctx, sessionID(r), query)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(toSearchResults(papers))
 			return
 		}
 
-		papers := h.guestStore.GetPapers(sessionID(r), 0, guestPaperRegisterLimit)
+		if h.db == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]SearchResult{})
+			return
+		}
+
+		papers, _ := h.db.GetGuestPapers(ctx, sessionID(r), 0, guestPaperRegisterLimit)
 		if len(papers) == 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)

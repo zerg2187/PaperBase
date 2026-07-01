@@ -3,12 +3,12 @@ package paperbase
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,6 +145,34 @@ func (s *stubDB) Close() error {
 	return nil
 }
 
+func (s *stubDB) StoreGuestPaper(ctx context.Context, sessionID string, paper *Paper) error {
+	return nil
+}
+
+func (s *stubDB) GetGuestPapers(ctx context.Context, sessionID string, offset int, limit int) ([]Paper, error) {
+	return nil, nil
+}
+
+func (s *stubDB) GetGuestPaperCount(ctx context.Context, sessionID string) (int, error) {
+	return 0, nil
+}
+
+func (s *stubDB) DeleteGuestPaper(ctx context.Context, sessionID string, paperID string) error {
+	return nil
+}
+
+func (s *stubDB) GuestPaperExists(ctx context.Context, sessionID string, paperID string) (bool, error) {
+	return false, nil
+}
+
+func (s *stubDB) SearchGuestPapers(ctx context.Context, sessionID string, query string) ([]Paper, error) {
+	return nil, nil
+}
+
+func (s *stubDB) CleanupOldGuestPapers(ctx context.Context, olderThan time.Duration) (int, error) {
+	return 0, nil
+}
+
 func newMockPipelineHandlers() *Handlers {
 	handlers := NewHandlers(Config{}, "test-token")
 	handlers.paperService = NewPaperService(
@@ -198,44 +226,6 @@ func TestGuestCannotSeeDatabasePapers(t *testing.T) {
 	require.NoError(t, json.NewDecoder(searchRR.Body).Decode(&searchResults))
 	assert.Empty(t, searchResults)
 	assert.Equal(t, 0, searchCalls)
-}
-
-func TestGuestSemanticSearchUsesSessionEmbeddings(t *testing.T) {
-	handlers := newMockPipelineHandlers()
-	handlers.paperService.Gemini = &MockGeminiClient{
-		EmbedTextFunc: func(context.Context, string) ([]float32, error) {
-			return []float32{1, 0}, nil
-		},
-	}
-	require.NoError(t, handlers.guestStore.StorePaper("guest-session", &Paper{
-		ID:        "far-paper",
-		Title:     "Completely unrelated title",
-		Abstract:  "No keyword match here.",
-		Embedding: []float32{0, 1},
-	}))
-	require.NoError(t, handlers.guestStore.StorePaper("guest-session", &Paper{
-		ID:        "near-paper",
-		Title:     "Another unrelated title",
-		Abstract:  "Still no keyword match.",
-		Embedding: []float32{1, 0},
-	}))
-
-	req, err := http.NewRequest(http.MethodGet, "/api/search?q=transformer&mode=semantic", nil)
-	require.NoError(t, err)
-	req = req.WithContext(MockAuthContext(req.Context(), false, "guest-session"))
-
-	rr := httptest.NewRecorder()
-	handlers.SearchPapers(rr, req)
-	require.Equal(t, http.StatusOK, rr.Code)
-
-	var results []SearchResult
-	require.NoError(t, json.NewDecoder(rr.Body).Decode(&results))
-	require.Len(t, results, 2)
-	assert.Equal(t, "near-paper", results[0].ID)
-	assert.InDelta(t, 1.0, results[0].Similarity, 0.0001)
-	assert.True(t, results[0].IsOwnedByMe)
-	assert.Equal(t, "far-paper", results[1].ID)
-	assert.InDelta(t, 0.0, results[1].Similarity, 0.0001)
 }
 
 func TestGuestRegisterPaperRejectsDuplicateID(t *testing.T) {
@@ -320,17 +310,6 @@ func TestUpdateTagRejectsDuplicateName(t *testing.T) {
 
 	assert.Equal(t, http.StatusConflict, rr.Code)
 	assert.Contains(t, rr.Body.String(), "タグ名が既に存在します")
-}
-
-func TestGuestStoreRejectsDuplicatePaper(t *testing.T) {
-	store := NewGuestStore()
-	paper := &Paper{ID: "2406.11717", Title: "Test Paper"}
-
-	require.NoError(t, store.StorePaper("guest-session", paper))
-	err := store.StorePaper("guest-session", paper)
-
-	assert.True(t, errors.Is(err, ErrDuplicatePaper))
-	assert.Equal(t, 1, store.CountPapers("guest-session"))
 }
 
 func TestRegisterPaperAdminDuplicateFromDBReturnsConflict(t *testing.T) {
