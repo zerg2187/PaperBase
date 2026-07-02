@@ -20,7 +20,7 @@ jobs:
 
     services:
       postgres:
-        image: ankane/pgvector:14
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_PASSWORD: password
           POSTGRES_USER: test
@@ -89,7 +89,7 @@ jobs:
           psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/init.sql
           psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_tags.sql
           psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_auth_and_guest.sql
-          psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/remove_guest_persistence.sql || true
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/remove_guest_persistence.sql
           psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_audit_logs.sql
           psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_guest_papers_table.sql
 
