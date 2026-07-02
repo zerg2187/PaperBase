@@ -3,6 +3,7 @@ package paperbase
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // =============================================================================
@@ -70,6 +71,14 @@ type PaperStore interface {
 	DeletePapers(ctx context.Context, ids []string) error
 	GetPapersPaginated(ctx context.Context, offset int, limit int) ([]Paper, error)
 	GetPapersByTag(ctx context.Context, tagID int, offset int, limit int) ([]Paper, error)
+	// Guest papers (separate table)
+	StoreGuestPaper(ctx context.Context, sessionID string, paper *Paper) error
+	GetGuestPapers(ctx context.Context, sessionID string, offset int, limit int) ([]Paper, error)
+	GetGuestPaperCount(ctx context.Context, sessionID string) (int, error)
+	DeleteGuestPaper(ctx context.Context, sessionID string, paperID string) error
+	GuestPaperExists(ctx context.Context, sessionID string, paperID string) (bool, error)
+	SearchGuestPapers(ctx context.Context, sessionID string, query string) ([]Paper, error)
+	CleanupOldGuestPapers(ctx context.Context, olderThan time.Duration) (int, error)
 }
 
 // TagStore はタグに関するDB操作を抽象化する

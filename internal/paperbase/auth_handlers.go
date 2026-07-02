@@ -85,8 +85,11 @@ func (h *Handlers) GetGuestStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !info.IsAdmin {
-		count := h.guestStore.CountPapers(info.SessionID)
+		count, err := h.db.GetGuestPaperCount(r.Context(), info.SessionID)
 		remaining := guestPaperRegisterLimit - count
+		if err != nil {
+			remaining = 0
+		}
 		if remaining < 0 {
 			remaining = 0
 		}

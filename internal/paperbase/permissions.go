@@ -7,6 +7,8 @@ import (
 	"net/http"
 )
 
+const guestPaperRegisterLimit = 5
+
 // isAdmin はリクエストが管理者かどうかを判定する
 func isAdmin(r *http.Request) bool {
 	return IsAdminRequest(r)
@@ -21,12 +23,26 @@ func sessionID(r *http.Request) string {
 func (h *Handlers) checkGuestPaperRegister(ctx context.Context, w http.ResponseWriter, r *http.Request, paperID string) bool {
 	sid := sessionID(r)
 
-	if h.guestStore.Exists(sid, paperID) {
+	if h.db == nil {
+		http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
+		return false
+	}
+
+	exists, err := h.db.GuestPaperExists(ctx, sid, paperID)
+	if err != nil {
+		http.Error(w, "論文存在確認に失敗しました", http.StatusInternalServerError)
+		return false
+	}
+	if exists {
 		http.Error(w, "論文IDが既に存在します", http.StatusConflict)
 		return false
 	}
 
-	count := h.guestStore.CountPapers(sid)
+	count, err := h.db.GetGuestPaperCount(ctx, sid)
+	if err != nil {
+		http.Error(w, "論文数確認に失敗しました", http.StatusInternalServerError)
+		return false
+	}
 	if count >= guestPaperRegisterLimit {
 		http.Error(w, fmt.Sprintf("ゲストは最大 %d 件まで論文を登録できます", guestPaperRegisterLimit), http.StatusForbidden)
 		return false
@@ -39,7 +55,12 @@ func (h *Handlers) checkGuestPaperRegister(ctx context.Context, w http.ResponseW
 func (h *Handlers) checkGuestPaperDelete(ctx context.Context, w http.ResponseWriter, r *http.Request, paperID string) bool {
 	sid := sessionID(r)
 
-	if !h.guestStore.Exists(sid, paperID) {
+	exists, err := h.db.GuestPaperExists(ctx, sid, paperID)
+	if err != nil {
+		http.Error(w, "論文存在確認に失敗しました", http.StatusInternalServerError)
+		return false
+	}
+	if !exists {
 		http.Error(w, "自分が登録した論文のみ削除できます", http.StatusForbidden)
 		return false
 	}

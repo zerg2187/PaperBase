@@ -102,10 +102,10 @@ func TestRegisterPaperHandler_Validation(t *testing.T) {
 			expectedStatus: http.StatusServiceUnavailable, // DB接続がないため
 		},
 		{
-			name:           "Valid format as guest (API call fails)",
+			name:           "Valid format as guest (no DB)",
 			body:           `{"arxiv_id": "1706.03762"}`,
 			isAdmin:        false,
-			expectedStatus: http.StatusInternalServerError, // 外部API呼び出しエラー
+			expectedStatus: http.StatusServiceUnavailable, // DB接続がないため
 		},
 	}
 

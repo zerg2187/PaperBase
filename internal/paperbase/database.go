@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/lib/pq"
 )
@@ -685,4 +686,169 @@ func (c *dbClientImpl) GetPapersByTag(ctx context.Context, tagID int, offset int
 	}
 
 	return papers, nil
+}
+
+// =============================================================================
+// Guest papers (separate table from admin papers)
+// =============================================================================
+
+// StoreGuestPaper はゲストセッションに論文を保存する
+func (c *dbClientImpl) StoreGuestPaper(ctx context.Context, sessionID string, paper *Paper) error {
+	vecStr := formatVector(paper.Embedding)
+
+	query := `
+		INSERT INTO guest_papers (id, session_id, title, authors, abstract, venue, year, bibtex, embedding)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+	`
+
+	_, err := c.db.ExecContext(ctx, query,
+		paper.ID, sessionID, paper.Title, pq.Array(paper.Authors),
+		paper.Abstract, paper.Venue, paper.Year, paper.BibTeX, vecStr)
+	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return ErrDuplicatePaper
+		}
+		return err
+	}
+
+	return nil
+}
+
+// GetGuestPapers はゲストセッションの論文をページネーション付きで取得する
+func (c *dbClientImpl) GetGuestPapers(ctx context.Context, sessionID string, offset int, limit int) ([]Paper, error) {
+	sqlQuery := `
+		SELECT id, title, authors, abstract, venue, year, bibtex
+		FROM guest_papers
+		WHERE session_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3;
+	`
+
+	rows, err := c.db.QueryContext(ctx, sqlQuery, sessionID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var papers []Paper
+	for rows.Next() {
+		var p Paper
+		var authors []string
+		var year sql.NullInt32
+		var bibtex sql.NullString
+		err := rows.Scan(&p.ID, &p.Title, pq.Array(&authors), &p.Abstract, &p.Venue, &year, &bibtex)
+		if err != nil {
+			return nil, err
+		}
+		p.Authors = authors
+		p.Year = intYear(year)
+		p.BibTeX = bibtex.String
+		p.IsOwnedByMe = true
+		papers = append(papers, p)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return papers, nil
+}
+
+// GetGuestPaperCount はゲストセッションの論文数を取得する
+func (c *dbClientImpl) GetGuestPaperCount(ctx context.Context, sessionID string) (int, error) {
+	query := `SELECT COUNT(*) FROM guest_papers WHERE session_id = $1;`
+
+	var count int
+	err := c.db.QueryRowContext(ctx, query, sessionID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+// DeleteGuestPaper はゲストセッションから論文を削除する
+func (c *dbClientImpl) DeleteGuestPaper(ctx context.Context, sessionID string, paperID string) error {
+	query := `DELETE FROM guest_papers WHERE session_id = $1 AND id = $2;`
+
+	result, err := c.db.ExecContext(ctx, query, sessionID, paperID)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("論文が見つかりません: %s", paperID)
+	}
+
+	return nil
+}
+
+// GuestPaperExists はゲストセッションに論文が存在するか確認する
+func (c *dbClientImpl) GuestPaperExists(ctx context.Context, sessionID string, paperID string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM guest_papers WHERE session_id = $1 AND id = $2);`
+
+	var exists bool
+	err := c.db.QueryRowContext(ctx, query, sessionID, paperID).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
+// SearchGuestPapers はゲストセッション内でキーワード検索を行う
+func (c *dbClientImpl) SearchGuestPapers(ctx context.Context, sessionID string, query string) ([]Paper, error) {
+	sqlQuery := `
+		SELECT id, title, authors, abstract, venue, year, bibtex
+		FROM guest_papers
+		WHERE session_id = $1 AND (title ILIKE $2 OR abstract ILIKE $2)
+		ORDER BY id
+		LIMIT 50;
+	`
+
+	searchPattern := "%" + query + "%"
+
+	rows, err := c.db.QueryContext(ctx, sqlQuery, sessionID, searchPattern)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var papers []Paper
+	for rows.Next() {
+		var p Paper
+		var authors []string
+		var year sql.NullInt32
+		var bibtex sql.NullString
+		err := rows.Scan(&p.ID, &p.Title, pq.Array(&authors), &p.Abstract, &p.Venue, &year, &bibtex)
+		if err != nil {
+			return nil, err
+		}
+		p.Authors = authors
+		p.Year = intYear(year)
+		p.BibTeX = bibtex.String
+		p.IsOwnedByMe = true
+		papers = append(papers, p)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return papers, nil
+}
+
+// CleanupOldGuestPapers は古いゲスト論文を削除する
+func (c *dbClientImpl) CleanupOldGuestPapers(ctx context.Context, olderThan time.Duration) (int, error) {
+	query := `DELETE FROM guest_papers WHERE created_at < NOW() - INTERVAL '1 millisecond' * $1;`
+
+	millis := int64(olderThan.Milliseconds())
+	result, err := c.db.ExecContext(ctx, query, millis)
+	if err != nil {
+		return 0, err
+	}
+
+	rows, _ := result.RowsAffected()
+	return int(rows), nil
 }

@@ -81,6 +81,9 @@ func main() {
 		DatabaseURL:  dbURL,
 	}, adminToken)
 
+	// Start guest paper cleanup job
+	handlers.StartGuestCleanup()
+
 	authMiddleware := paperbase.NewAuthMiddleware(adminToken)
 
 	// ルーティング設定
