@@ -7,6 +7,8 @@ import (
 	"net/http"
 )
 
+const guestPaperRegisterLimit = 5
+
 // isAdmin はリクエストが管理者かどうかを判定する
 func isAdmin(r *http.Request) bool {
 	return IsAdminRequest(r)
@@ -22,8 +24,8 @@ func (h *Handlers) checkGuestPaperRegister(ctx context.Context, w http.ResponseW
 	sid := sessionID(r)
 
 	if h.db == nil {
-		// DBがない場合はチェックをスキップ（テスト用）
-		return true
+		http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
+		return false
 	}
 
 	exists, err := h.db.GuestPaperExists(ctx, sid, paperID)
@@ -53,11 +55,6 @@ func (h *Handlers) checkGuestPaperRegister(ctx context.Context, w http.ResponseW
 func (h *Handlers) checkGuestPaperDelete(ctx context.Context, w http.ResponseWriter, r *http.Request, paperID string) bool {
 	sid := sessionID(r)
 
-	if h.db == nil {
-		// DBがない場合はチェックをスキップ（テスト用）
-		return true
-	}
-
 	exists, err := h.db.GuestPaperExists(ctx, sid, paperID)
 	if err != nil {
 		http.Error(w, "論文存在確認に失敗しました", http.StatusInternalServerError)
@@ -81,4 +78,3 @@ func (h *Handlers) logOperation(ctx context.Context, r *http.Request, action, ta
 		log.Printf("操作ログ記録エラー: %v", err)
 	}
 }
-const guestPaperRegisterLimit = 5

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +32,9 @@ type stubDB struct {
 	setPaperTagsFunc                       func(context.Context, string, []int) error
 	logOperationFunc                       func(context.Context, *AuthInfo, string, string, map[string]interface{}, string, string) error
 	closeFunc                              func() error
+
+	guestMu     sync.Mutex
+	guestStore  map[string]map[string]Paper // sessionID -> paperID -> Paper
 }
 
 func (s *stubDB) UpsertPaper(ctx context.Context, paper *Paper) error {
@@ -146,27 +150,92 @@ func (s *stubDB) Close() error {
 }
 
 func (s *stubDB) StoreGuestPaper(ctx context.Context, sessionID string, paper *Paper) error {
+	s.guestMu.Lock()
+	defer s.guestMu.Unlock()
+	if s.guestStore == nil {
+		s.guestStore = make(map[string]map[string]Paper)
+	}
+	if _, ok := s.guestStore[sessionID]; !ok {
+		s.guestStore[sessionID] = make(map[string]Paper)
+	}
+	if _, exists := s.guestStore[sessionID][paper.ID]; exists {
+		return ErrDuplicatePaper
+	}
+	s.guestStore[sessionID][paper.ID] = *paper
 	return nil
 }
 
 func (s *stubDB) GetGuestPapers(ctx context.Context, sessionID string, offset int, limit int) ([]Paper, error) {
-	return nil, nil
+	s.guestMu.Lock()
+	defer s.guestMu.Unlock()
+	if s.guestStore == nil {
+		return nil, nil
+	}
+	sessMap, ok := s.guestStore[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	papers := make([]Paper, 0, len(sessMap))
+	for _, p := range sessMap {
+		p.IsOwnedByMe = true
+		papers = append(papers, p)
+	}
+	return papers, nil
 }
 
 func (s *stubDB) GetGuestPaperCount(ctx context.Context, sessionID string) (int, error) {
+	s.guestMu.Lock()
+	defer s.guestMu.Unlock()
+	if s.guestStore == nil {
+		return 0, nil
+	}
+	if sessMap, ok := s.guestStore[sessionID]; ok {
+		return len(sessMap), nil
+	}
 	return 0, nil
 }
 
 func (s *stubDB) DeleteGuestPaper(ctx context.Context, sessionID string, paperID string) error {
+	s.guestMu.Lock()
+	defer s.guestMu.Unlock()
+	if s.guestStore == nil {
+		return nil
+	}
+	if sessMap, ok := s.guestStore[sessionID]; ok {
+		delete(sessMap, paperID)
+	}
 	return nil
 }
 
 func (s *stubDB) GuestPaperExists(ctx context.Context, sessionID string, paperID string) (bool, error) {
+	s.guestMu.Lock()
+	defer s.guestMu.Unlock()
+	if s.guestStore == nil {
+		return false, nil
+	}
+	if sessMap, ok := s.guestStore[sessionID]; ok {
+		_, exists := sessMap[paperID]
+		return exists, nil
+	}
 	return false, nil
 }
 
 func (s *stubDB) SearchGuestPapers(ctx context.Context, sessionID string, query string) ([]Paper, error) {
-	return nil, nil
+	s.guestMu.Lock()
+	defer s.guestMu.Unlock()
+	if s.guestStore == nil {
+		return nil, nil
+	}
+	sessMap, ok := s.guestStore[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	papers := make([]Paper, 0)
+	for _, p := range sessMap {
+		p.IsOwnedByMe = true
+		papers = append(papers, p)
+	}
+	return papers, nil
 }
 
 func (s *stubDB) CleanupOldGuestPapers(ctx context.Context, olderThan time.Duration) (int, error) {
@@ -233,6 +302,7 @@ func TestGuestRegisterPaperRejectsDuplicateID(t *testing.T) {
 	if handlers.db != nil {
 		t.Skip("Skipping test with real DB - requires proper cleanup between test runs")
 	}
+	handlers.db = &stubDB{}
 
 	req1, err := http.NewRequest(http.MethodPost, "/api/papers", strings.NewReader(`{"arxiv_id":"2406.11717"}`))
 	require.NoError(t, err)
@@ -257,6 +327,7 @@ func TestGuestPapersAreMarkedOwned(t *testing.T) {
 	if handlers.db != nil {
 		t.Skip("Skipping test with real DB - requires proper cleanup between test runs")
 	}
+	handlers.db = &stubDB{}
 
 	registerReq, err := http.NewRequest(http.MethodPost, "/api/papers", strings.NewReader(`{"arxiv_id":"2406.11717"}`))
 	require.NoError(t, err)
