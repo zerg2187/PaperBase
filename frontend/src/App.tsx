@@ -72,6 +72,13 @@ function App() {
 
   // Detail panel state
   const [activePaper, setActivePaper] = useState<SearchResult | null>(null)
+  // クリックしたカードの真横に詳細を表示するためのオフセット(main-content 基準)
+  const [activeCardTop, setActiveCardTop] = useState(0)
+
+  const handleItemClick = (paper: SearchResult, offsetTop: number) => {
+    setActivePaper(paper)
+    setActiveCardTop(offsetTop)
+  }
 
   // Cart checkbox handler
   const handleToggleCart = (paperId: string) => {
@@ -361,13 +368,13 @@ function App() {
             isInCart={isInCart}
             onToggle={handleToggleCart}
             onSelectAll={toggleSelectAll}
-            onItemClick={setActivePaper}
+            onItemClick={handleItemClick}
             onRegisterClick={() => setShowRegisterModal(true)}
           />
         </div>
 
         {activePaper && (
-          <div className="detail-panel-zone">
+          <div className="detail-panel-zone" style={{ marginTop: activeCardTop }}>
             <DetailPanel
               paper={activePaper}
               authRole={authRole}
@@ -398,6 +405,12 @@ function App() {
         progress={registerProgress}
         onClose={() => setShowRegisterModal(false)}
         onRegister={handleRegister}
+        onCreateTag={async (name, color) => {
+          const tag = await createTagHook(name, color)
+          showSuccess(`タグ「${name}」を作成しました`)
+          await loadTags()
+          return tag
+        }}
       />
 
       <SearchModal

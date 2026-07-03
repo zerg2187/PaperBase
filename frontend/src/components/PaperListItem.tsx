@@ -1,3 +1,4 @@
+import { type MouseEvent } from 'react'
 import type { SearchResult } from '../types'
 
 type PaperListItemProps = {
@@ -5,7 +6,7 @@ type PaperListItemProps = {
   active: boolean
   inCart: boolean
   authRole: 'admin' | 'guest' | null
-  onClick: () => void
+  onClick: (offsetTop: number) => void
   onToggleCart: () => void
 }
 
@@ -20,9 +21,18 @@ export function PaperListItem({
   const mainTag = paper.tags && paper.tags.length > 0 ? paper.tags[0] : null
   const extraTags = paper.tags ? paper.tags.slice(1) : []
 
+  const handleClick = (e: MouseEvent<HTMLElement>) => {
+    const card = e.currentTarget
+    const container = card.closest('.main-content')
+    const offsetTop = container
+      ? card.getBoundingClientRect().top - container.getBoundingClientRect().top
+      : 0
+    onClick(offsetTop)
+  }
+
   return (
     <article
-      onClick={onClick}
+      onClick={handleClick}
       className={`paper-list-item ${active ? 'active' : ''}`}
     >
       <div className="paper-list-item-main">
