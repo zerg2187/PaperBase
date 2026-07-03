@@ -43,7 +43,17 @@ func isSecureContext(r *http.Request) bool {
 }
 
 // setSessionCookie はセッション Cookie を設定する
+//
+// フロントエンドとバックエンドが別ドメイン（クロスサイト）で動く本番構成では、
+// SameSite=Lax の Cookie は fetch/XHR に添付されず、リクエストごとに新しい
+// セッションが発行されてしまう（登録は成功するが一覧に反映されない）。
+// HTTPS 経由（secure=true）のときは SameSite=None; Secure にしてクロスサイト送信を許可する。
+// localhost（http, same-site）では SameSite=None; Secure はブラウザに拒否されるため Lax を維持する。
 func setSessionCookie(w http.ResponseWriter, sessionID string, secure bool) {
+	sameSite := http.SameSiteLaxMode
+	if secure {
+		sameSite = http.SameSiteNoneMode
+	}
 	cookie := &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    sessionID,
@@ -51,7 +61,7 @@ func setSessionCookie(w http.ResponseWriter, sessionID string, secure bool) {
 		MaxAge:   sessionCookieMaxAge,
 		HttpOnly: true,
 		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 	}
 	http.SetCookie(w, cookie)
 }

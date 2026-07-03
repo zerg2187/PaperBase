@@ -358,7 +358,7 @@ func (c *dbClientImpl) GetPapersPaginated(ctx context.Context, offset int, limit
 	sqlQuery := `
 		WITH page_papers AS (
 			SELECT id FROM papers
-			ORDER BY id DESC
+			ORDER BY created_at DESC, id DESC
 			LIMIT $1 OFFSET $2
 		)
 		SELECT p.id, p.title, p.authors, p.abstract, p.venue, p.year, p.bibtex,
@@ -367,7 +367,7 @@ func (c *dbClientImpl) GetPapersPaginated(ctx context.Context, offset int, limit
 		JOIN papers p ON p.id = pp.id
 		LEFT JOIN paper_tags pt ON p.id = pt.paper_id
 		LEFT JOIN tags t ON pt.tag_id = t.id
-		ORDER BY p.id DESC;
+		ORDER BY p.created_at DESC, p.id DESC;
 	`
 
 	rows, err := c.db.QueryContext(ctx, sqlQuery, limit, offset)

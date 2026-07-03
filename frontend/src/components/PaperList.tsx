@@ -10,7 +10,7 @@ type PaperListProps = {
   isInCart: (id: string) => boolean
   onToggle: (id: string) => void
   onSelectAll: () => void
-  onItemClick: (paper: SearchResult) => void
+  onItemClick: (paper: SearchResult, offsetTop: number) => void
   onRegisterClick: () => void
 }
 
@@ -68,7 +68,7 @@ export function PaperList({
                 active={activePaperId === paper.id}
                 inCart={isInCart(paper.id)}
                 authRole={authRole}
-                onClick={() => onItemClick(paper)}
+                onClick={(offsetTop) => onItemClick(paper, offsetTop)}
                 onToggleCart={() => onToggle(paper.id)}
               />
             ))}

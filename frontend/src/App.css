@@ -1455,6 +1455,7 @@ body {
 .tag-select-btn {
 	display: inline-flex;
 	align-items: center;
+	gap: 6px;
 	padding: 8px 14px;
 	border: 1px solid var(--gray-200);
 	border-radius: 20px;
@@ -1471,6 +1472,15 @@ body {
 
 .tag-select-btn.selected {
 	font-weight: 600;
+	box-shadow: 0 0 0 1px currentColor inset;
+}
+
+.tag-select-check {
+	display: inline-flex;
+	justify-content: center;
+	width: 12px;
+	font-size: 0.85rem;
+	font-weight: 700;
 }
 
 .no-tags-hint {

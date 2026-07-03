@@ -54,6 +54,7 @@ export function TagManagerModal({
     await onCreateTag(newTagName.trim(), newTagColor)
     setNewTagName('')
     setNewTagColor(randomColor())
+    onClose()
   }
 
   const handleBulkDeleteTags = async () => {
