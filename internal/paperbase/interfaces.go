@@ -78,6 +78,7 @@ type PaperStore interface {
 	DeleteGuestPaper(ctx context.Context, sessionID string, paperID string) error
 	GuestPaperExists(ctx context.Context, sessionID string, paperID string) (bool, error)
 	SearchGuestPapers(ctx context.Context, sessionID string, query string) ([]Paper, error)
+	SearchGuestPapersSemantic(ctx context.Context, sessionID string, queryVector []float32, limit int) ([]PaperWithSimilarity, error)
 	CleanupOldGuestPapers(ctx context.Context, olderThan time.Duration) (int, error)
 }
 

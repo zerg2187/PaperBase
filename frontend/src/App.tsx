@@ -219,8 +219,11 @@ function App() {
       return
     }
 
+    const lastName = (name: string) => name.trim().split(/\s+/).pop() ?? name
     const content = cart.map(p => {
-      const authors = p.authors.join(', ')
+      const authors = p.authors.length > 1
+        ? `${lastName(p.authors[0])} et al.`
+        : (p.authors[0] ?? '')
       return `${p.title}\n${authors} (${p.year})`
     }).join('\n\n')
 
