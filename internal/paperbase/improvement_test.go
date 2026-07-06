@@ -238,6 +238,31 @@ func (s *stubDB) SearchGuestPapers(ctx context.Context, sessionID string, query 
 	return papers, nil
 }
 
+func (s *stubDB) SearchGuestPapersSemantic(ctx context.Context, sessionID string, queryVector []float32, limit int) ([]PaperWithSimilarity, error) {
+	s.guestMu.Lock()
+	defer s.guestMu.Unlock()
+	sessMap, ok := s.guestStore[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	results := make([]PaperWithSimilarity, 0, len(sessMap))
+	for _, p := range sessMap {
+		results = append(results, PaperWithSimilarity{
+			ID:          p.ID,
+			Title:       p.Title,
+			Authors:     p.Authors,
+			Abstract:    p.Abstract,
+			Venue:       p.Venue,
+			Year:        p.Year,
+			BibTeX:      p.BibTeX,
+			Similarity:  1,
+			Tags:        []Tag{},
+			IsOwnedByMe: true,
+		})
+	}
+	return results, nil
+}
+
 func (s *stubDB) CleanupOldGuestPapers(ctx context.Context, olderThan time.Duration) (int, error) {
 	return 0, nil
 }

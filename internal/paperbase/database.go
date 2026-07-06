@@ -839,6 +839,53 @@ func (c *dbClientImpl) SearchGuestPapers(ctx context.Context, sessionID string, 
 	return papers, nil
 }
 
+// SearchGuestPapersSemantic はゲストセッション内でpgvectorによるセマンティック検索を行う。
+// GetGuestPapersはembedding列を取得しないため、in-memory cosineでは類似度が常に0になる。
+// ここではDB側で 1 - (embedding <=> query) を計算し、session_idでスコープする。
+func (c *dbClientImpl) SearchGuestPapersSemantic(ctx context.Context, sessionID string, queryVector []float32, limit int) ([]PaperWithSimilarity, error) {
+	vecStr := formatVector(queryVector)
+
+	sqlQuery := `
+		SELECT id, title, authors, abstract, venue, year, bibtex,
+		       1 - (embedding <=> $1::vector) as similarity
+		FROM guest_papers
+		WHERE session_id = $2 AND embedding IS NOT NULL
+		ORDER BY embedding <=> $1::vector
+		LIMIT $3;
+	`
+
+	rows, err := c.db.QueryContext(ctx, sqlQuery, vecStr, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var papers []PaperWithSimilarity
+	for rows.Next() {
+		var p PaperWithSimilarity
+		var authors []string
+		var year sql.NullInt32
+		var bibtex sql.NullString
+		var similarity float64
+		if err := rows.Scan(&p.ID, &p.Title, pq.Array(&authors), &p.Abstract, &p.Venue, &year, &bibtex, &similarity); err != nil {
+			return nil, err
+		}
+		p.Authors = authors
+		p.Year = intYear(year)
+		p.BibTeX = bibtex.String
+		p.Similarity = similarity
+		p.Tags = []Tag{}
+		p.IsOwnedByMe = true
+		papers = append(papers, p)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return papers, nil
+}
+
 // CleanupOldGuestPapers は古いゲスト論文を削除する
 func (c *dbClientImpl) CleanupOldGuestPapers(ctx context.Context, olderThan time.Duration) (int, error) {
 	query := `DELETE FROM guest_papers WHERE created_at < NOW() - INTERVAL '1 millisecond' * $1;`
