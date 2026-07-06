@@ -28,6 +28,37 @@ export function DetailPanel({
       </div>
 
       <div className="detail-panel-content">
+        <div className="detail-actions">
+          <button onClick={onCopyBibTeX} className="action-btn action-copy" title="BibTeXコピー">
+            <span>📋</span>
+            BibTeX
+          </button>
+          <a
+            href={`https://alphaxiv.org/abs/${paper.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="action-btn action-link"
+          >
+            <span>💬</span>
+            AlphaXiv
+          </a>
+          <a
+            href={`https://arxiv.org/abs/${paper.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="action-btn action-link"
+          >
+            <span>🔗</span>
+            arXiv
+          </a>
+          {(authRole === 'admin' || paper.is_owned_by_me) && (
+            <button onClick={onDelete} className="action-btn action-delete" title="削除">
+              <span>🗑️</span>
+              削除
+            </button>
+          )}
+        </div>
+
         {authRole === 'admin' && (
           <div className="detail-tags">
             {extraTags.map(tag => (
@@ -70,37 +101,6 @@ export function DetailPanel({
         )}
 
         <p className="detail-abstract">{paper.abstract}</p>
-
-        <div className="detail-actions">
-          <button onClick={onCopyBibTeX} className="action-btn action-copy" title="BibTeXコピー">
-            <span>📋</span>
-            BibTeX
-          </button>
-          <a
-            href={`https://alphaxiv.org/abs/${paper.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="action-btn action-link"
-          >
-            <span>💬</span>
-            AlphaXiv
-          </a>
-          <a
-            href={`https://arxiv.org/abs/${paper.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="action-btn action-link"
-          >
-            <span>🔗</span>
-            arXiv
-          </a>
-          {(authRole === 'admin' || paper.is_owned_by_me) && (
-            <button onClick={onDelete} className="action-btn action-delete" title="削除">
-              <span>🗑️</span>
-              削除
-            </button>
-          )}
-        </div>
       </div>
     </aside>
   )
