@@ -93,7 +93,10 @@ function App() {
   }
 
   // Initial load
+  // authRole が確定(admin/guest)してから取得する。null(認証確認中)のまま fetch すると
+  // サーバ側のセッション/ロール確定前に走り、ログイン直後に一覧が0件になることがある。
   useEffect(() => {
+    if (authRole === null) return
     loadPapers()
     if (authRole === 'admin') {
       loadTags()
@@ -310,6 +313,9 @@ function App() {
   }
 
   const handleTagFilterSelect = (tagId: number | null) => {
+    // タグと検索は排他。検索中にタグを選択/解除すると isFiltered が残り、
+    // 「すべて」に戻したとき displayPapers が古い検索結果になって欠けるため、検索状態を解除する。
+    clearSearch()
     setSelectedTagFilter(tagId)
   }
 
