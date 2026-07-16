@@ -190,6 +190,23 @@ describe('App Component', () => {
     })
   })
 
+  it('should fall back to guest and keep rendering when auth status fails', async () => {
+    mockServer.use(
+      http.get('http://localhost:8080/api/auth/status', () => {
+        return HttpResponse.error()
+      })
+    )
+
+    const { container } = render(<App />)
+
+    // authRole が guest にフォールバックし、初期ロードが走って論文が表示される
+    await waitFor(() => {
+      const papers = container.querySelectorAll('.paper-list-item')
+      expect(papers.length).toBeGreaterThan(0)
+    })
+    expect(screen.queryByText('タグ管理')).not.toBeInTheDocument()
+  })
+
   it('should hide tag UI for guests', async () => {
     mockServer.use(
       http.get('http://localhost:8080/api/auth/status', () => {

@@ -23,7 +23,7 @@ import { useToast } from './hooks/useToast'
 import { useTags } from './hooks/useTags'
 import { usePapers } from './hooks/usePapers'
 import { usePaperRegistration } from './hooks/usePaperRegistration'
-import { useCart } from './hooks/useCart'
+import { useCart, clearCartStorage } from './hooks/useCart'
 
 function App() {
   // Hooks
@@ -108,6 +108,7 @@ function App() {
   const handleLogin = async (token: string) => {
     const result = await login(token)
     if (result.success) {
+      clearCartStorage()
       window.location.reload()
     }
   }
@@ -127,6 +128,10 @@ function App() {
 
     try {
       await deletePaperFromList(paper.id)
+      removeFromCart(paper.id)
+      if (activePaper?.id === paper.id) {
+        setActivePaper(null)
+      }
       showSuccess('論文を削除しました')
       await loadPapers()
       await loadAuthStatus()
@@ -242,6 +247,9 @@ function App() {
       await bulkDelete(cartIds)
       showSuccess(`${cartIds.length}件の論文を削除しました`)
       clearCart()
+      if (activePaper && cartIds.includes(activePaper.id)) {
+        setActivePaper(null)
+      }
       await loadPapers()
       await loadAuthStatus()
     } catch (err) {
