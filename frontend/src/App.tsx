@@ -20,7 +20,6 @@ import { LoginModal } from './components/modals/LoginModal'
 
 import { useAuth } from './hooks/useAuth'
 import { useToast } from './hooks/useToast'
-import { useSelection } from './hooks/useSelection'
 import { useTags } from './hooks/useTags'
 import { usePapers } from './hooks/usePapers'
 import { usePaperRegistration } from './hooks/usePaperRegistration'
@@ -59,7 +58,6 @@ function App() {
   const { tags, loading: tagsLoading, loadTags, createTag: createTagHook, updateTag: updateTagHook, deleteTag: deleteTagHook, bulkDeleteTags } = useTags()
 
   const { successMessage, errorMessage, showSuccess, showError, clearSuccess, clearError } = useToast()
-  const { selected: selectedPapers, selectAll: selectAllPapers, clear: clearSelection } = useSelection<string>()
   const { registerLoading, registerProgress, register: registerPapers } = usePaperRegistration()
   const { cart, addToCart, removeFromCart, clearCart, isInCart } = useCart()
 
@@ -140,8 +138,6 @@ function App() {
   const handleSearch = async (query: string, mode: SearchMode) => {
     try {
       const results = await search(query, mode)
-      clearSelection()
-      selectAllPapers(results.map(p => p.id))
       showSuccess(`${results.length}件の論文が見つかりました`)
     } catch (err) {
       showError(err instanceof Error ? err.message : '検索に失敗しました')
@@ -151,7 +147,6 @@ function App() {
   const clearFilter = () => {
     clearSearch()
     clearTagFilter()
-    clearSelection()
   }
 
   const handleRegister = async (ids: string[], tagIds: number[]) => {
@@ -321,7 +316,7 @@ function App() {
     <div className="app">
       <Header
         paperCount={displayCount}
-        selectedCount={selectedPapers.size}
+        selectedCount={cart.length}
         authRole={authRole}
         guestRemainingCount={guestRemainingCount}
         registerLoading={registerLoading}
