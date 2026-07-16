@@ -612,13 +612,16 @@ func uniquePositiveInts(values []int) []int {
 func (c *dbClientImpl) GetPapersByTag(ctx context.Context, tagID int, offset int, limit int) ([]Paper, error) {
 	log.Printf("GetPapersByTag: tagID=%d, offset=%d, limit=%d", tagID, offset, limit)
 
+	// GetPapersPaginated と同じ「登録が新しい順」で返す。
+	// paper_tags の PK は (paper_id, tag_id) なので単一 tag_id の絞り込みで
+	// 重複行は発生せず、DISTINCT は不要
 	sqlQuery := `
 		WITH page_papers AS (
-			SELECT DISTINCT p.id
+			SELECT p.id
 			FROM papers p
 			INNER JOIN paper_tags pt ON p.id = pt.paper_id
 			WHERE pt.tag_id = $1
-			ORDER BY p.id DESC
+			ORDER BY p.created_at DESC, p.id DESC
 			LIMIT $2 OFFSET $3
 		)
 		SELECT p.id, p.title, p.authors, p.abstract, p.venue, p.year, p.bibtex,
@@ -627,7 +630,7 @@ func (c *dbClientImpl) GetPapersByTag(ctx context.Context, tagID int, offset int
 		JOIN papers p ON p.id = pp.id
 		LEFT JOIN paper_tags pt2 ON p.id = pt2.paper_id
 		LEFT JOIN tags t ON pt2.tag_id = t.id
-		ORDER BY p.id DESC;
+		ORDER BY p.created_at DESC, p.id DESC;
 	`
 
 	rows, err := c.db.QueryContext(ctx, sqlQuery, tagID, limit, offset)
@@ -843,8 +846,7 @@ func (c *dbClientImpl) SearchGuestPapers(ctx context.Context, sessionID string, 
 }
 
 // SearchGuestPapersSemantic はゲストセッション内でpgvectorによるセマンティック検索を行う。
-// GetGuestPapersはembedding列を取得しないため、in-memory cosineでは類似度が常に0になる。
-// ここではDB側で 1 - (embedding <=> query) を計算し、session_idでスコープする。
+// DB側で 1 - (embedding <=> query) を計算し、session_idでスコープする。
 func (c *dbClientImpl) SearchGuestPapersSemantic(ctx context.Context, sessionID string, queryVector []float32, limit int) ([]PaperWithSimilarity, error) {
 	vecStr := formatVector(queryVector)
 
