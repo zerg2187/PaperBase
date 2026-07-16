@@ -79,13 +79,9 @@ func (h *Handlers) RegisterPaper(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if admin {
-		// 管理者はDBに永続化
+		// 管理者はDBに永続化（既存IDはメタデータ更新）
 		if err := h.db.UpsertPaper(ctx, paper); err != nil {
 			log.Printf("DB保存エラー: %v", err)
-			if errors.Is(err, ErrDuplicatePaper) {
-				http.Error(w, "論文IDが既に存在します", http.StatusConflict)
-				return
-			}
 			http.Error(w, "論文の保存に失敗しました", http.StatusInternalServerError)
 			return
 		}

@@ -87,22 +87,25 @@ func appendUniqueTag(tags []Tag, tag Tag) []Tag {
 func (c *dbClientImpl) UpsertPaper(ctx context.Context, paper *Paper) error {
 	vecStr := formatVector(paper.Embedding)
 
+	// 既存 id への再登録はメタデータと埋め込みの更新として扱う。
+	// updated_at はトリガー update_papers_updated_at が更新する。
 	query := `
 		INSERT INTO papers (id, title, authors, abstract, venue, year, bibtex, embedding)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (id) DO UPDATE SET
+			title = EXCLUDED.title,
+			authors = EXCLUDED.authors,
+			abstract = EXCLUDED.abstract,
+			venue = EXCLUDED.venue,
+			year = EXCLUDED.year,
+			bibtex = EXCLUDED.bibtex,
+			embedding = EXCLUDED.embedding;
 	`
 
 	_, err := c.db.ExecContext(ctx, query,
 		paper.ID, paper.Title, pq.Array(paper.Authors),
 		paper.Abstract, paper.Venue, paper.Year, paper.BibTeX, vecStr)
-	if err != nil {
-		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
-			return ErrDuplicatePaper
-		}
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (c *dbClientImpl) SearchPapers(ctx context.Context, query string, mode string) ([]Paper, error) {

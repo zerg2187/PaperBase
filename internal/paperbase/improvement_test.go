@@ -419,11 +419,14 @@ func TestUpdateTagRejectsDuplicateName(t *testing.T) {
 	assert.Contains(t, rr.Body.String(), "タグ名が既に存在します")
 }
 
-func TestRegisterPaperAdminDuplicateFromDBReturnsConflict(t *testing.T) {
+func TestRegisterPaperAdminUpsertSucceeds(t *testing.T) {
+	// 既存IDの再登録は UPSERT（メタデータ更新）として成功する
+	var upsertCalls int
 	handlers := newMockPipelineHandlers()
 	handlers.db = &stubDB{
 		upsertPaperFunc: func(context.Context, *Paper) error {
-			return ErrDuplicatePaper
+			upsertCalls++
+			return nil
 		},
 	}
 	handlers.paperService.DB = handlers.db
@@ -435,8 +438,27 @@ func TestRegisterPaperAdminDuplicateFromDBReturnsConflict(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handlers.RegisterPaper(rr, req)
 
-	assert.Equal(t, http.StatusConflict, rr.Code)
-	assert.Contains(t, rr.Body.String(), "論文IDが既に存在します")
+	assert.Equal(t, http.StatusCreated, rr.Code)
+	assert.Equal(t, 1, upsertCalls)
+}
+
+func TestRegisterPaperAdminDBErrorReturns500(t *testing.T) {
+	handlers := newMockPipelineHandlers()
+	handlers.db = &stubDB{
+		upsertPaperFunc: func(context.Context, *Paper) error {
+			return errors.New("db error")
+		},
+	}
+	handlers.paperService.DB = handlers.db
+
+	req, err := http.NewRequest(http.MethodPost, "/api/papers", strings.NewReader(`{"arxiv_id":"2406.11717"}`))
+	require.NoError(t, err)
+	req = req.WithContext(MockAuthContext(req.Context(), true, "admin-session"))
+
+	rr := httptest.NewRecorder()
+	handlers.RegisterPaper(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }
 
 func TestGuestKeywordSearchDBErrorReturns500(t *testing.T) {
