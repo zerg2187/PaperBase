@@ -3,6 +3,7 @@ package paperbase
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +32,7 @@ type stubDB struct {
 	getPaperTagsFunc                       func(context.Context, string) ([]Tag, error)
 	setPaperTagsFunc                       func(context.Context, string, []int) error
 	logOperationFunc                       func(context.Context, *AuthInfo, string, string, map[string]interface{}, string, string) error
+	searchGuestPapersFunc                  func(context.Context, string, string) ([]Paper, error)
 	closeFunc                              func() error
 
 	guestMu     sync.Mutex
@@ -221,6 +223,9 @@ func (s *stubDB) GuestPaperExists(ctx context.Context, sessionID string, paperID
 }
 
 func (s *stubDB) SearchGuestPapers(ctx context.Context, sessionID string, query string) ([]Paper, error) {
+	if s.searchGuestPapersFunc != nil {
+		return s.searchGuestPapersFunc(ctx, sessionID, query)
+	}
 	s.guestMu.Lock()
 	defer s.guestMu.Unlock()
 	if s.guestStore == nil {
@@ -432,6 +437,38 @@ func TestRegisterPaperAdminDuplicateFromDBReturnsConflict(t *testing.T) {
 
 	assert.Equal(t, http.StatusConflict, rr.Code)
 	assert.Contains(t, rr.Body.String(), "論文IDが既に存在します")
+}
+
+func TestGuestKeywordSearchDBErrorReturns500(t *testing.T) {
+	handlers := newMockPipelineHandlers()
+	handlers.db = &stubDB{
+		searchGuestPapersFunc: func(context.Context, string, string) ([]Paper, error) {
+			return nil, errors.New("db error")
+		},
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "/api/search?q=transformer&mode=keyword", nil)
+	require.NoError(t, err)
+	req = req.WithContext(MockAuthContext(req.Context(), false, "guest-session"))
+
+	rr := httptest.NewRecorder()
+	handlers.SearchPapers(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestGuestDeletePaperNoDBReturns503(t *testing.T) {
+	// DB 未接続時にゲスト削除が panic せず 503 を返すこと
+	handlers := NewHandlers(Config{}, "test-token")
+
+	req, err := http.NewRequest(http.MethodDelete, "/api/papers/2406.11717", nil)
+	require.NoError(t, err)
+	req = req.WithContext(MockAuthContext(req.Context(), false, "guest-session"))
+
+	rr := httptest.NewRecorder()
+	handlers.DeletePaper(rr, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
 }
 
 func TestUniquePositiveInts(t *testing.T) {

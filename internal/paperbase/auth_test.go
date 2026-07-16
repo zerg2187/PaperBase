@@ -2,6 +2,7 @@ package paperbase
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,6 +117,53 @@ func TestAuthHandler_Login(t *testing.T) {
 			assert.Equal(t, tt.expectedStatus, rr.Code)
 		})
 	}
+}
+
+func TestAuthHandler_Login_EmptyAdminToken(t *testing.T) {
+	// ADMIN_SECRET_TOKEN 未設定時に空トークンでログイン成功しないこと
+	handler := NewHandlers(Config{}, "")
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "Empty token", body: `{"token": ""}`},
+		{name: "Missing token field", body: `{}`},
+		{name: "Non-empty token", body: `{"token": "anything"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest("POST", "/api/auth/login", strings.NewReader(tt.body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+
+			rr := httptest.NewRecorder()
+			handler.Login(rr, req)
+
+			assert.Equal(t, http.StatusUnauthorized, rr.Code)
+		})
+	}
+}
+
+func TestGetGuestStatus_NoDB(t *testing.T) {
+	// DB 未接続時にゲストの status 取得が panic せず、残数フィールドなしで返ること
+	handler := NewHandlers(Config{}, "admin-token")
+
+	req, err := http.NewRequest("GET", "/api/auth/status", nil)
+	require.NoError(t, err)
+	req = req.WithContext(MockAuthContext(req.Context(), false, "test-session"))
+
+	rr := httptest.NewRecorder()
+	handler.GetGuestStatus(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, "guest", body["role"])
+	_, hasRemaining := body["remaining_paper_count"]
+	assert.False(t, hasRemaining)
 }
 
 func TestAuthHandler_Logout(t *testing.T) {

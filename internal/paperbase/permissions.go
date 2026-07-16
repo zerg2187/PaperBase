@@ -55,6 +55,11 @@ func (h *Handlers) checkGuestPaperRegister(ctx context.Context, w http.ResponseW
 func (h *Handlers) checkGuestPaperDelete(ctx context.Context, w http.ResponseWriter, r *http.Request, paperID string) bool {
 	sid := sessionID(r)
 
+	if h.db == nil {
+		http.Error(w, "データベース接続がありません", http.StatusServiceUnavailable)
+		return false
+	}
+
 	exists, err := h.db.GuestPaperExists(ctx, sid, paperID)
 	if err != nil {
 		http.Error(w, "論文存在確認に失敗しました", http.StatusInternalServerError)
