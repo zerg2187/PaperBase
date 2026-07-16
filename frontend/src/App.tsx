@@ -29,6 +29,18 @@ import { useCart } from './hooks/useCart'
 function App() {
   // Hooks
   const {
+    authRole,
+    guestRemainingCount,
+    showLoginModal,
+    setShowLoginModal,
+    loginError,
+    loginLoading,
+    login,
+    logout,
+    loadAuthStatus,
+  } = useAuth()
+
+  const {
     papers,
     filteredPapers,
     loading: papersLoading,
@@ -42,21 +54,9 @@ function App() {
     deletePaper: deletePaperFromList,
     bulkDelete,
     displayPapers,
-  } = usePapers()
+  } = usePapers(authRole)
 
   const { tags, loading: tagsLoading, loadTags, createTag: createTagHook, updateTag: updateTagHook, deleteTag: deleteTagHook, bulkDeleteTags } = useTags()
-
-  const {
-    authRole,
-    guestRemainingCount,
-    showLoginModal,
-    setShowLoginModal,
-    loginError,
-    loginLoading,
-    login,
-    logout,
-    loadAuthStatus,
-  } = useAuth()
 
   const { successMessage, errorMessage, showSuccess, showError, clearSuccess, clearError } = useToast()
   const { selected: selectedPapers, selectAll: selectAllPapers, clear: clearSelection } = useSelection<string>()
@@ -142,9 +142,7 @@ function App() {
       const results = await search(query, mode)
       clearSelection()
       selectAllPapers(results.map(p => p.id))
-      if (mode === 'keyword') {
-        showSuccess(`${results.length}件の論文が見つかりました`)
-      }
+      showSuccess(`${results.length}件の論文が見つかりました`)
     } catch (err) {
       showError(err instanceof Error ? err.message : '検索に失敗しました')
     }
@@ -424,6 +422,7 @@ function App() {
 
       <SearchModal
         isOpen={showSearchModal}
+        authRole={authRole}
         loading={papersLoading}
         onClose={() => setShowSearchModal(false)}
         onSearch={handleSearch}

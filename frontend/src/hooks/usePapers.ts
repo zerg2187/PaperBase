@@ -5,7 +5,7 @@ import type { SearchResult, SearchMode } from '../types'
 const SIMILARITY_THRESHOLD = 0.30
 const FETCH_ALL_LIMIT = 10000
 
-export function usePapers() {
+export function usePapers(authRole: 'admin' | 'guest' | null) {
   const [papers, setPapers] = useState<SearchResult[]>([])
   const [filteredPapers, setFilteredPapers] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -28,8 +28,9 @@ export function usePapers() {
     setLoading(true)
     try {
       const data = await searchPapers(query, mode)
+      // しきい値は admin のみ。ゲストは最大5件の小コーパスで全滅しやすいため全件表示する
       const filtered = data.filter(p => {
-        if (mode === 'semantic' && p.similarity !== undefined) {
+        if (authRole === 'admin' && mode === 'semantic' && p.similarity !== undefined) {
           return p.similarity >= SIMILARITY_THRESHOLD
         }
         return true
@@ -39,13 +40,15 @@ export function usePapers() {
       })
       setFilteredPapers(sorted)
       setIsFiltered(true)
+      // 検索とタグ絞り込みは排他。タグが残ると displayPapers が検索結果を表示しない
+      setSelectedTagFilter(null)
       setSearchQuery(query)
       setSearchMode(mode)
       return sorted
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [authRole])
 
   const clearSearch = useCallback(() => {
     setFilteredPapers([])

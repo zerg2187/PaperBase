@@ -55,7 +55,7 @@ describe('App Component', () => {
     })
   })
 
-  it('should not show result count toast for semantic search', async () => {
+  it('should show result count toast for semantic search', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -65,9 +65,67 @@ describe('App Component', () => {
     await user.click(screen.getByRole('button', { name: '検索' }))
 
     await waitFor(() => {
-      expect(screen.queryByText('論文検索')).not.toBeInTheDocument()
+      expect(screen.getByText('1件の論文が見つかりました')).toBeInTheDocument()
     })
-    expect(screen.queryByText(/件の論文が見つかりました/)).not.toBeInTheDocument()
+  })
+
+  it('should show low-similarity results for guest semantic search', async () => {
+    mockServer.use(
+      http.get('http://localhost:8080/api/auth/status', () => {
+        return HttpResponse.json({
+          role: 'guest',
+          session_id: 'guest-session-id',
+          remaining_paper_count: 5,
+        })
+      }),
+      http.get('http://localhost:8080/api/search', () => {
+        return HttpResponse.json([
+          {
+            id: 'guest-result-1',
+            title: 'Guest Low Similarity Paper',
+            authors: ['Guest Author'],
+            venue: 'Guest Venue',
+            year: 2024,
+            abstract: 'Guest abstract',
+            bibtex: '@article{guest}',
+            similarity: 0.1,
+            tags: [],
+          },
+        ])
+      })
+    )
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    const searchButton = await screen.findByText('検索')
+    await user.click(searchButton)
+    await user.type(screen.getByLabelText('検索クエリ'), 'guest query')
+    await user.click(screen.getByRole('button', { name: '検索' }))
+
+    // ゲストは類似度しきい値を適用しないため 0.1 でも表示される
+    await waitFor(() => {
+      expect(screen.getByText('Guest Low Similarity Paper')).toBeInTheDocument()
+    })
+  })
+
+  it('should show search results while a tag filter is active', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    // タグ絞り込みを有効化
+    const tagChip = await screen.findByText('LLM')
+    await user.click(tagChip)
+
+    // タグ絞り込み中に検索すると、タグが解除され検索結果が表示される
+    const searchButton = await screen.findByText('検索')
+    await user.click(searchButton)
+    await user.type(screen.getByLabelText('検索クエリ'), 'query with tag filter')
+    await user.click(screen.getByRole('button', { name: '検索' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Search Result Paper')).toBeInTheDocument()
+    })
   })
 
   it('should show result count toast for keyword search', async () => {
