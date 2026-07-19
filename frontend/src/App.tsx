@@ -20,14 +20,25 @@ import { LoginModal } from './components/modals/LoginModal'
 
 import { useAuth } from './hooks/useAuth'
 import { useToast } from './hooks/useToast'
-import { useSelection } from './hooks/useSelection'
 import { useTags } from './hooks/useTags'
 import { usePapers } from './hooks/usePapers'
 import { usePaperRegistration } from './hooks/usePaperRegistration'
-import { useCart } from './hooks/useCart'
+import { useCart, clearCartStorage } from './hooks/useCart'
 
 function App() {
   // Hooks
+  const {
+    authRole,
+    guestRemainingCount,
+    showLoginModal,
+    setShowLoginModal,
+    loginError,
+    loginLoading,
+    login,
+    logout,
+    loadAuthStatus,
+  } = useAuth()
+
   const {
     papers,
     filteredPapers,
@@ -42,24 +53,11 @@ function App() {
     deletePaper: deletePaperFromList,
     bulkDelete,
     displayPapers,
-  } = usePapers()
+  } = usePapers(authRole)
 
   const { tags, loading: tagsLoading, loadTags, createTag: createTagHook, updateTag: updateTagHook, deleteTag: deleteTagHook, bulkDeleteTags } = useTags()
 
-  const {
-    authRole,
-    guestRemainingCount,
-    showLoginModal,
-    setShowLoginModal,
-    loginError,
-    loginLoading,
-    login,
-    logout,
-    loadAuthStatus,
-  } = useAuth()
-
   const { successMessage, errorMessage, showSuccess, showError, clearSuccess, clearError } = useToast()
-  const { selected: selectedPapers, selectAll: selectAllPapers, clear: clearSelection } = useSelection<string>()
   const { registerLoading, registerProgress, register: registerPapers } = usePaperRegistration()
   const { cart, addToCart, removeFromCart, clearCart, isInCart } = useCart()
 
@@ -110,6 +108,7 @@ function App() {
   const handleLogin = async (token: string) => {
     const result = await login(token)
     if (result.success) {
+      clearCartStorage()
       window.location.reload()
     }
   }
@@ -129,6 +128,10 @@ function App() {
 
     try {
       await deletePaperFromList(paper.id)
+      removeFromCart(paper.id)
+      if (activePaper?.id === paper.id) {
+        setActivePaper(null)
+      }
       showSuccess('論文を削除しました')
       await loadPapers()
       await loadAuthStatus()
@@ -140,11 +143,7 @@ function App() {
   const handleSearch = async (query: string, mode: SearchMode) => {
     try {
       const results = await search(query, mode)
-      clearSelection()
-      selectAllPapers(results.map(p => p.id))
-      if (mode === 'keyword') {
-        showSuccess(`${results.length}件の論文が見つかりました`)
-      }
+      showSuccess(`${results.length}件の論文が見つかりました`)
     } catch (err) {
       showError(err instanceof Error ? err.message : '検索に失敗しました')
     }
@@ -153,7 +152,6 @@ function App() {
   const clearFilter = () => {
     clearSearch()
     clearTagFilter()
-    clearSelection()
   }
 
   const handleRegister = async (ids: string[], tagIds: number[]) => {
@@ -249,6 +247,9 @@ function App() {
       await bulkDelete(cartIds)
       showSuccess(`${cartIds.length}件の論文を削除しました`)
       clearCart()
+      if (activePaper && cartIds.includes(activePaper.id)) {
+        setActivePaper(null)
+      }
       await loadPapers()
       await loadAuthStatus()
     } catch (err) {
@@ -323,7 +324,7 @@ function App() {
     <div className="app">
       <Header
         paperCount={displayCount}
-        selectedCount={selectedPapers.size}
+        selectedCount={cart.length}
         authRole={authRole}
         guestRemainingCount={guestRemainingCount}
         registerLoading={registerLoading}
@@ -424,6 +425,7 @@ function App() {
 
       <SearchModal
         isOpen={showSearchModal}
+        authRole={authRole}
         loading={papersLoading}
         onClose={() => setShowSearchModal(false)}
         onSearch={handleSearch}

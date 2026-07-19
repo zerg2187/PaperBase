@@ -59,20 +59,43 @@ cp .env.example .env
 DATABASE_URL=postgres://user:password@localhost:5432/paperbase?sslmode=disable
 GEMINI_API_KEY=your_gemini_api_key
 SEMANTIC_API_KEY=your_semantic_scholar_api_key
+ADMIN_SECRET_TOKEN=your_admin_token
+FRONTEND_URL=http://localhost:5173
 PORT=8080
 ```
 
+`FRONTEND_URL` は CORS の許可オリジンです。未設定の場合は localhost 系オリジンのみ許可されるため、本番（フロントエンドとバックエンドが別ドメイン）では必ずフロントエンドの URL を設定してください。
+
 ### 3. データベースを準備
 
-#### ローカル PostgreSQL の場合
+マイグレーションは以下の順で**すべて**適用する必要があります（`init.sql` だけではゲスト機能と操作ログが動きません）。
 
 ```bash
 psql $DATABASE_URL -f migrations/init.sql
+psql $DATABASE_URL -f migrations/add_auth_and_guest.sql
+psql $DATABASE_URL -f migrations/remove_guest_persistence.sql
+psql $DATABASE_URL -f migrations/add_audit_logs.sql
+psql $DATABASE_URL -f migrations/add_guest_papers_table.sql
+psql $DATABASE_URL -f migrations/guest_papers_composite_pk.sql
 ```
+
+#### ローカル PostgreSQL の場合
+
+`add_auth_and_guest.sql` の RLS ポリシーが `anon` / `authenticated` ロールを参照するため、事前にロールを作成しておきます（Supabase には最初から存在します）。
+
+```bash
+psql $DATABASE_URL -c "DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+END \$\$;"
+psql $DATABASE_URL -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+そのうえで上記のマイグレーションを順に適用します。
 
 #### Supabase を使う場合
 
-Supabase プロジェクト作成後、SQL Editor で `migrations/init.sql` の内容を実行するか、[Supabase CLI](#supabase-cli) でマイグレーションを適用してください。
+Supabase プロジェクト作成後、SQL Editor で上記マイグレーションの内容を**同じ順で**実行するか、[Supabase CLI](#supabase-cli) で適用してください。
 
 ### 4. バックエンドを起動
 
@@ -172,14 +195,17 @@ cd frontend && npm run test:run
 │   ├── clients.go              # 外部 API クライアント
 │   ├── models.go               # 外部 API レスポンス型
 │   ├── auth.go                 # セッション Cookie・admin 判定
-│   ├── guest_store.go          # ゲスト用インメモリ論文ストア
+│   ├── pagination_handlers.go  # 論文一覧（ページネーション）
+│   ├── paper_ids.go            # arXiv ID の検証・正規化
+│   ├── errors.go               # 重複エラー定義
 │   └── *_test.go               # テスト
 ├── migrations/
 │   ├── init.sql                # 初期スキーマ（papers, tags, paper_tags, pgvector）
-│   ├── add_tags.sql            # タグ機能
 │   ├── add_auth_and_guest.sql  # ゲスト認証・所有者・RLS
 │   ├── remove_guest_persistence.sql  # ゲスト永続化削除
-│   └── add_audit_logs.sql      # 操作ログ
+│   ├── add_audit_logs.sql      # 操作ログ
+│   ├── add_guest_papers_table.sql    # ゲスト論文テーブル（DB保存）
+│   └── guest_papers_composite_pk.sql # ゲスト論文の複合PK化
 ├── frontend/                   # React + Vite フロントエンド
 │   ├── src/
 │   │   ├── App.tsx             # メインアプリ（状態組み立て）
@@ -232,7 +258,7 @@ cd frontend && npm run test:run
 
 1. Supabase プロジェクトを作成
 2. Dashboard → SQL Editor → `New query`
-3. `migrations/init.sql` の内容を貼り付けて `Run`
+3. [データベースを準備](#3-データベースを準備) に記載の全マイグレーションを同じ順で貼り付けて `Run`
 4. Project Settings → Database → Connection string → URI をコピー
 5. `.env` の `DATABASE_URL` に設定
 
@@ -257,7 +283,12 @@ supabase link --project-ref your-project-ref
 
 ```bash
 mkdir -p supabase/migrations
-cp migrations/init.sql supabase/migrations/20240101000000_init.sql
+cp migrations/init.sql                     supabase/migrations/20240101000000_init.sql
+cp migrations/add_auth_and_guest.sql       supabase/migrations/20240101000001_add_auth_and_guest.sql
+cp migrations/remove_guest_persistence.sql supabase/migrations/20240101000002_remove_guest_persistence.sql
+cp migrations/add_audit_logs.sql           supabase/migrations/20240101000003_add_audit_logs.sql
+cp migrations/add_guest_papers_table.sql   supabase/migrations/20240101000004_add_guest_papers_table.sql
+cp migrations/guest_papers_composite_pk.sql supabase/migrations/20240101000005_guest_papers_composite_pk.sql
 ```
 
 #### 4. リモート DB に適用
@@ -304,7 +335,7 @@ git push -u origin main
 3. **Web Service** を作成（Go）
    - Build Command: `go build -o paperbase main.go`
    - Start Command: `./paperbase`
-   - 環境変数: `DATABASE_URL`, `GEMINI_API_KEY`, `SEMANTIC_API_KEY`, `PORT=10000`
+   - 環境変数: `DATABASE_URL`, `GEMINI_API_KEY`, `SEMANTIC_API_KEY`, `ADMIN_SECRET_TOKEN`, `FRONTEND_URL=https://your-frontend.example.com`, `PORT=10000`
 4. **Static Site** を作成（React）
    - Root Directory: `frontend`
    - Build Command: `npm install && npm run build`
@@ -334,7 +365,7 @@ mux.Handle("GET /", http.FileServer(http.FS(staticFS)))
 ## 注意事項
 
 - `.env` や API キーは絶対に Git にコミットしないでください（`.gitignore` に含まれています）。
-- 本番環境では CORS の `Access-Control-Allow-Origin: *` をフロントエンドのドメインに絞ってください。
+- 本番環境では `FRONTEND_URL` にフロントエンドのオリジンを設定してください。CORS はこの値と完全一致するオリジンのみ許可し、未設定時は localhost 系オリジンだけを許可します。
 - PostgreSQL は外部ホスティングサービス（Render PostgreSQL、[Supabase](#supabase-でのデータベース構築)、AWS RDS など）を利用してください。
 - Supabase を使う場合、接続文字列に `sslmode=require` を含め、5432 ポート（Direct connection）または 6543 ポート（Transaction pooler）を使用してください。
 

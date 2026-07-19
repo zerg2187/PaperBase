@@ -21,20 +21,25 @@ func (h *Handlers) SearchPapers(w http.ResponseWriter, r *http.Request) {
 		mode = "semantic"
 	}
 
-	// ゲストはセッション内のインメモリ論文だけを検索対象にする
+	// ゲストは自セッションの guest_papers テーブルだけを検索対象にする
 	if !isAdmin(r) {
-		if mode == "keyword" {
-		papers, _ := h.db.SearchGuestPapers(ctx, sessionID(r), query)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(toSearchResults(papers))
-			return
-		}
-
 		if h.db == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode([]SearchResult{})
+			return
+		}
+
+		if mode == "keyword" {
+			papers, err := h.db.SearchGuestPapers(ctx, sessionID(r), query)
+			if err != nil {
+				log.Printf("ゲストキーワード検索エラー: %v", err)
+				http.Error(w, "検索エラー", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(toSearchResults(papers))
 			return
 		}
 
@@ -45,8 +50,7 @@ func (h *Handlers) SearchPapers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// embedding列はDB側で類似度計算する（GetGuestPapersはembeddingを取得しないため、
-		// in-memory cosineでは常に0件になる）
+		// 類似度は DB 側（pgvector）で計算する
 		results, err := h.db.SearchGuestPapersSemantic(ctx, sessionID(r), vector, 10)
 		if err != nil {
 			log.Printf("ゲストセマンティック検索エラー: %v", err)

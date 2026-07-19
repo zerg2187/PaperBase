@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getGuestStatus, loginAdmin, logoutAdmin, setAdminToken } from '../api'
+import { clearCartStorage } from './useCart'
 
 export function useAuth() {
   const [authRole, setAuthRole] = useState<'admin' | 'guest' | null>(null)
@@ -23,6 +24,10 @@ export function useAuth() {
       }
     } catch (err) {
       console.error('認証状態取得エラー:', err)
+      // 初回失敗時のみ guest にフォールバックする。null のままだと初期ロードが
+      // 永久に走らずアプリ全体が空表示で止まる。再取得の一時エラーで admin を
+      // 降格させないよう、確定済みロールは維持する。
+      setAuthRole(prev => prev ?? 'guest')
     }
   }, [])
 
@@ -49,6 +54,7 @@ export function useAuth() {
     try {
       await logoutAdmin()
       setAdminToken(null)
+      clearCartStorage()
       window.location.reload()
       return { success: true }
     } catch (err) {

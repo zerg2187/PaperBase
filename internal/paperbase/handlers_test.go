@@ -43,6 +43,12 @@ func TestSearchPapersHandler_Validation(t *testing.T) {
 			expectedStatus: http.StatusOK,
 		},
 		{
+			name:           "Guest keyword query (no DB)",
+			query:          "transformer&mode=keyword",
+			isAdmin:        false,
+			expectedStatus: http.StatusOK,
+		},
+		{
 			name:           "Admin valid query (no DB)",
 			query:          "transformer",
 			isAdmin:        true,

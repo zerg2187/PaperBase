@@ -91,6 +91,7 @@ jobs:
           psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/remove_guest_persistence.sql
           psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_audit_logs.sql
           psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/add_guest_papers_table.sql
+          psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/guest_papers_composite_pk.sql
 
       - name: Run Go tests
         run: go test ./...

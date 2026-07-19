@@ -79,13 +79,9 @@ func (h *Handlers) RegisterPaper(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if admin {
-		// 管理者はDBに永続化
+		// 管理者はDBに永続化（既存IDはメタデータ更新）
 		if err := h.db.UpsertPaper(ctx, paper); err != nil {
 			log.Printf("DB保存エラー: %v", err)
-			if errors.Is(err, ErrDuplicatePaper) {
-				http.Error(w, "論文IDが既に存在します", http.StatusConflict)
-				return
-			}
 			http.Error(w, "論文の保存に失敗しました", http.StatusInternalServerError)
 			return
 		}
@@ -269,17 +265,6 @@ func (h *Handlers) DeletePaper(w http.ResponseWriter, r *http.Request) {
 		if !h.checkGuestPaperDelete(ctx, w, r, paperID) {
 			return
 		}
-			if h.db == nil {
-				// DBがない場合は何もしない（テスト用）
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(map[string]string{
-					"status":  "success",
-					"message": "論文を削除しました",
-					"id":      paperID,
-				})
-				return
-			}
 		if err := h.db.DeleteGuestPaper(ctx, sessionID(r), paperID); err != nil {
 			log.Printf("論文削除エラー: %v", err)
 			http.Error(w, "削除エラー", http.StatusInternalServerError)

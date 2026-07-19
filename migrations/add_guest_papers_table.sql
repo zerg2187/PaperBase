@@ -1,6 +1,6 @@
 -- Guest papers table (separate from admin papers table)
 -- Stores papers registered by guest users, keyed by session_id
--- Auto-cleaned up after 24 hours of inactivity
+-- Auto-cleaned up 24 hours after creation (created_at based)
 
 CREATE TABLE IF NOT EXISTS guest_papers (
     id TEXT PRIMARY KEY,

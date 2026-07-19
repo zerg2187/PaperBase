@@ -5,12 +5,13 @@ const SIMILARITY_THRESHOLD = 0.30
 
 type SearchModalProps = {
   isOpen: boolean
+  authRole: 'admin' | 'guest' | null
   loading: boolean
   onClose: () => void
   onSearch: (query: string, mode: SearchMode) => Promise<void>
 }
 
-export function SearchModal({ isOpen, loading, onClose, onSearch }: SearchModalProps) {
+export function SearchModal({ isOpen, authRole, loading, onClose, onSearch }: SearchModalProps) {
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<SearchMode>('semantic')
 
@@ -55,9 +56,12 @@ export function SearchModal({ isOpen, loading, onClose, onSearch }: SearchModalP
               <option value="semantic">セマンティック（意味検索）</option>
               <option value="keyword">キーワード検索</option>
             </select>
-            <p className="form-help">
-              セマンティック検索では類似度{SIMILARITY_THRESHOLD * 100}%以上の論文を表示します
-            </p>
+            {/* しきい値フィルタは admin のみ適用（usePapers.search） */}
+            {authRole === 'admin' && (
+              <p className="form-help">
+                セマンティック検索では類似度{SIMILARITY_THRESHOLD * 100}%以上の論文を表示します
+              </p>
+            )}
           </div>
           <div className="modal-footer">
             <button type="button" onClick={onClose} className="btn-secondary">

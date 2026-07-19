@@ -19,7 +19,8 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Token != h.adminToken {
+	// adminToken 未設定時は空トークン同士の一致でログイン成功してしまうため、明示的に拒否する
+	if h.adminToken == "" || req.Token != h.adminToken {
 		// わざと曖昧なエラーメッセージ
 		http.Error(w, "認証に失敗しました", http.StatusUnauthorized)
 		return
@@ -84,7 +85,8 @@ func (h *Handlers) GetGuestStatus(w http.ResponseWriter, r *http.Request) {
 		"session_id": info.SessionID,
 	}
 
-	if !info.IsAdmin {
+	// db 未接続時は残数を返さない（フロントは remaining_paper_count 欠落時にバッジを出さない）
+	if !info.IsAdmin && h.db != nil {
 		count, err := h.db.GetGuestPaperCount(r.Context(), info.SessionID)
 		remaining := guestPaperRegisterLimit - count
 		if err != nil {

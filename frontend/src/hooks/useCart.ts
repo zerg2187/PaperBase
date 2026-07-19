@@ -3,6 +3,12 @@ import type { SearchResult, Tag } from '../types'
 
 const CART_STORAGE_KEY = 'paperbase_cart'
 
+// ロール切替（ログイン/ログアウト）時に呼ぶ。カートは sessionStorage に永続化される
+// ため、リロードだけでは前ロールの論文（bibtex 込み）が持ち越されてしまう
+export function clearCartStorage() {
+  sessionStorage.removeItem(CART_STORAGE_KEY)
+}
+
 export interface CartItem {
   id: string
   title: string

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -16,22 +17,22 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 
-			// 許可されたオリジンを設定
+			// オリジンごとにレスポンスが変わるため、キャッシュ汚染防止に常に付与
+			w.Header().Add("Vary", "Origin")
+
+			var allowed bool
 			if allowedOrigin != "" && allowedOrigin != "*" {
 				// 本番: 指定されたオリジンのみ許可
-				if origin == allowedOrigin {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					w.Header().Set("Access-Control-Allow-Credentials", "true")
-				}
+				allowed = origin == allowedOrigin
 			} else {
-				// 開発: リクエスト元のオリジンをミラーして許可
-				// FRONTEND_URL が未設定の場合のフォールバック
-				if origin != "" {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					w.Header().Set("Access-Control-Allow-Credentials", "true")
-				} else {
-					w.Header().Set("Access-Control-Allow-Origin", "*")
-				}
+				// FRONTEND_URL 未設定（または "*"）はローカル開発のみ想定。
+				// credentials 付きで任意オリジンを反射すると全サイトに Cookie 込みの
+				// API アクセスを許してしまうため、localhost 系だけ許可する
+				allowed = isLocalOrigin(origin)
+			}
+			if allowed {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE, PATCH")
@@ -47,6 +48,16 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isLocalOrigin はローカル開発用オリジン（localhost / 127.0.0.1 / ::1）か判定する
+func isLocalOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func main() {
@@ -71,7 +82,7 @@ func main() {
 	}
 
 	if allowedOrigin == "" {
-		log.Println("警告: FRONTEND_URLが設定されていません。開発モードとしてリクエスト元のオリジンを許可します。本番では必ず FRONTEND_URL を設定してください。")
+		log.Println("警告: FRONTEND_URLが設定されていません。localhost 系オリジンのみ許可します。本番では必ず FRONTEND_URL を設定してください。")
 	}
 
 	// ハンドラの初期化
@@ -113,7 +124,7 @@ func main() {
 		w.Write([]byte(`{"status":"healthy"}`))
 	})
 
-	// 認証ミドルウェア → CORSミドルウェアの順で適用
+	// CORSミドルウェア → 認証ミドルウェアの順で適用
 	handler := corsMiddleware(allowedOrigin)(authMiddleware(mux))
 
 	// サーバー設定
