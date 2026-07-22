@@ -37,8 +37,15 @@ type S2Journal struct {
 	Pages  string `json:"pages"`
 }
 
+type S2Author struct {
+	Name string `json:"name"`
+}
+
 type S2Response struct {
 	ExternalIds      S2ExternalIds `json:"externalIds"`
+	Title            string        `json:"title"`
+	Abstract         string        `json:"abstract"`
+	Authors          []S2Author    `json:"authors"`
 	Venue            string        `json:"venue"`
 	Year             int           `json:"year"`
 	Journal          *S2Journal    `json:"journal"`
