@@ -23,42 +23,74 @@ type arxivClientImpl struct {
 // NewArxivClient は新しいarXivクライアントを作成する
 func NewArxivClient() ArxivClient {
 	return &arxivClientImpl{
-		client: &http.Client{Timeout: 30 * time.Second},
+		// arXiv API は混雑時に正常応答でも 15 秒程度かかるため長めに取る
+		client: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
+// arxivRetryDelays はリトライ前の待機時間。
+// arXiv API はレート制限（429）や無応答が頻発するが、
+// 実測で 25 秒程度空けると通るため待機を長めに取る。
+var arxivRetryDelays = []time.Duration{5 * time.Second, 20 * time.Second}
+
 func (c *arxivClientImpl) GetPaper(ctx context.Context, arxivID string) (*ArxivEntry, error) {
-	arxivURL := fmt.Sprintf("http://export.arxiv.org/api/query?id_list=%s", arxivID)
-	req, err := http.NewRequestWithContext(ctx, "GET", arxivURL, nil)
-	if err != nil {
-		return nil, err
+	arxivURL := fmt.Sprintf("https://export.arxiv.org/api/query?id_list=%s", arxivID)
+
+	var lastErr error
+	for attempt := 0; attempt <= len(arxivRetryDelays); attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(arxivRetryDelays[attempt-1]):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", arxivURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		// UA なしのクライアントは arXiv に遮断されることがある
+		req.Header.Set("User-Agent", "paperbase/1.0 (https://github.com/zerg2187/paperbase)")
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+			lastErr = fmt.Errorf("arXiv API status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("arXiv API status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+
+		var feed ArxivFeed
+		if err := xml.Unmarshal(body, &feed); err != nil {
+			return nil, err
+		}
+
+		if len(feed.Entries) == 0 {
+			return nil, fmt.Errorf("paper not found: %s", arxivID)
+		}
+
+		entry := feed.Entries[0]
+		entry.Title = strings.TrimSpace(strings.ReplaceAll(entry.Title, "\n", " "))
+		entry.Summary = strings.TrimSpace(strings.ReplaceAll(entry.Summary, "\n", " "))
+
+		return &entry, nil
 	}
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var feed ArxivFeed
-	if err := xml.Unmarshal(body, &feed); err != nil {
-		return nil, err
-	}
-
-	if len(feed.Entries) == 0 {
-		return nil, fmt.Errorf("paper not found: %s", arxivID)
-	}
-
-	entry := feed.Entries[0]
-	entry.Title = strings.TrimSpace(strings.ReplaceAll(entry.Title, "\n", " "))
-	entry.Summary = strings.TrimSpace(strings.ReplaceAll(entry.Summary, "\n", " "))
-
-	return &entry, nil
+	return nil, lastErr
 }
 
 // =============================================================================
@@ -79,7 +111,8 @@ func NewSemanticScholarClient(apiKey string) SemanticScholarClient {
 }
 
 func (c *s2ClientImpl) GetPaperByArxivID(ctx context.Context, arxivID string) (*S2Response, error) {
-	s2URL := fmt.Sprintf("https://api.semanticscholar.org/graph/v1/paper/ARXIV:%s?fields=externalIds,venue,citationStyles,year,journal,publicationVenue", arxivID)
+	// title,abstract,authors は arXiv API 障害時のフォールバック用
+	s2URL := fmt.Sprintf("https://api.semanticscholar.org/graph/v1/paper/ARXIV:%s?fields=externalIds,title,abstract,authors,venue,citationStyles,year,journal,publicationVenue", arxivID)
 
 	var result S2Response
 	maxRetries := 5

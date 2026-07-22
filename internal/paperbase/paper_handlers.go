@@ -135,29 +135,47 @@ func (h *Handlers) processPaperPipeline(ctx context.Context, arxivID string) (*P
 	log.Printf("論文処理開始: %s", arxivID)
 
 	// Step 1: arXiv API からメタデータを取得
+	// arXiv はレート制限・無応答が頻発するため、失敗しても即エラーにせず
+	// Semantic Scholar のメタデータで登録を続行する
 	log.Printf("[Step 1] arXiv API 通信中...")
-	arxivEntry, err := h.paperService.Arxiv.GetPaper(ctx, arxivID)
-	if err != nil {
-		return nil, fmt.Errorf("arXiv API エラー: %w", err)
-	}
-	log.Printf("[Step 1] 完了 (所要時間: %v)", time.Since(start))
-
-	// 著者リストの作成
+	var title, abstract string
 	var authors []string
-	for _, author := range arxivEntry.Authors {
-		authors = append(authors, author.Name)
+	arxivEntry, arxivErr := h.paperService.Arxiv.GetPaper(ctx, arxivID)
+	if arxivErr != nil {
+		log.Printf("[Step 1] arXiv API 失敗: %v (Semantic Scholar にフォールバック)", arxivErr)
+	} else {
+		title = arxivEntry.Title
+		abstract = arxivEntry.Summary
+		for _, author := range arxivEntry.Authors {
+			authors = append(authors, author.Name)
+		}
+		log.Printf("[Step 1] 完了 (所要時間: %v)", time.Since(start))
 	}
 
 	// Step 2: Semantic Scholar API から学会情報を取得
 	log.Printf("[Step 2] Semantic Scholar API 通信中...")
 	s2Data, err := h.paperService.SemanticScholar.GetPaperByArxivID(ctx, arxivID)
 	if err != nil {
+		if arxivErr != nil {
+			return nil, fmt.Errorf("arXiv API エラー: %v / Semantic Scholar API エラー: %w", arxivErr, err)
+		}
 		return nil, fmt.Errorf("Semantic Scholar API エラー: %w", err)
 	}
 	log.Printf("[Step 2] 完了")
 
-	title := arxivEntry.Title
-	abstract := arxivEntry.Summary
+	// arXiv 失敗時は S2 のメタデータで補完
+	if arxivErr != nil {
+		if s2Data.Title == "" {
+			return nil, fmt.Errorf("arXiv API エラー: %w (Semantic Scholar にもメタデータなし)", arxivErr)
+		}
+		title = s2Data.Title
+		abstract = s2Data.Abstract
+		for _, author := range s2Data.Authors {
+			authors = append(authors, author.Name)
+		}
+		log.Printf("[Step 2] S2 メタデータで補完 (title/abstract/authors)")
+	}
+
 	var venue string
 	var bibtex string
 
