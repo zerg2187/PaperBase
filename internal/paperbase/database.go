@@ -333,13 +333,15 @@ func (c *dbClientImpl) LogOperation(ctx context.Context, info *AuthInfo, action,
 		role = "admin"
 	}
 
-	var detailsJSON []byte
+	// binary_parameters=yes のとき []byte は bytea バイナリで送られ、jsonb 列で
+	// "unsupported jsonb version number" になるため text (string) で渡す
+	var detailsJSON interface{}
 	if len(details) > 0 {
-		var err error
-		detailsJSON, err = json.Marshal(details)
+		b, err := json.Marshal(details)
 		if err != nil {
 			return err
 		}
+		detailsJSON = string(b)
 	}
 
 	_, err := c.db.ExecContext(ctx, `
